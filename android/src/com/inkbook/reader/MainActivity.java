@@ -49,9 +49,12 @@ public final class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) applyImmersive();
+        if (!hasFocus) return;
+        if (readerView != null) applyImmersive();
+        else applyNormalChrome();
     }
 
+    /** Full immersive (hidden status/navigation bars) - reading screen only. */
     private void applyImmersive() {
         View decor = getWindow().getDecorView();
         decor.setSystemUiVisibility(
@@ -63,11 +66,24 @@ public final class MainActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
+    /** Normal app chrome for the library: visible light status/navigation bars. */
+    private void applyNormalChrome() {
+        View decor = getWindow().getDecorView();
+        decor.setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        try {
+            getWindow().setStatusBarColor(0xFFF7F6F3);
+            getWindow().setNavigationBarColor(0xFFF7F6F3);
+        } catch (Exception ignored) { }
+    }
+
     private void showLibrary() {
         readerView = null;
         setContentView(libraryView);
         libraryView.refresh();
-        applyImmersive();
+        applyNormalChrome();
     }
 
     // ------------------------------------------------------------ sample

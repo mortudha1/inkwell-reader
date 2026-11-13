@@ -49,7 +49,8 @@ public final class ReaderView extends View {
     private int pageIndex = 0;
     private Paginator.Page page;
     private int pageCacheIdx = -1;
-    private int flashFrames = 0;
+    private int flashFrames = 0;   // dark e-ink blink frame
+    private int ghostFrames = 0;   // faint ghosting residue frame
     private String hint = null;
     private int hintFrames = 0;
 
@@ -258,6 +259,7 @@ public final class ReaderView extends View {
                                 page = null;
                                 pageCacheIdx = -1;
                                 flashFrames = settings.flash ? 1 : 0;
+                                ghostFrames = settings.flash ? 1 : 0;
                                 invalidate();
                             }
                         });
@@ -330,6 +332,14 @@ public final class ReaderView extends View {
             cv.drawText(hint, W / 2f, H * 0.5f, pHint);
             if (hintFrames <= 0) hint = null;
             postInvalidateDelayed(900);
+        }
+        if (ghostFrames > 0) {
+            ghostFrames--;
+            // wash the whole screen like e-ink settling after a refresh
+            pFill.setColor(th.ghost);
+            cv.drawRect(0, 0, W, H, pFill);
+            postInvalidateDelayed(60);
+            return;
         }
         postInvalidateDelayed(60000);
     }
@@ -697,8 +707,12 @@ public final class ReaderView extends View {
 
     // ------------------------------------------------------------ navigation
 
+    /** E-ink style page turn: quick dark blink, then a ghosting settle frame. */
     private void flashTurn() {
-        flashFrames = settings.flash ? 2 : 0;
+        if (settings.flash) {
+            flashFrames = 1;
+            ghostFrames = 1;
+        }
         if (settings.haptic) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
     }
 

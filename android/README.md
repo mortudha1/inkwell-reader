@@ -1,17 +1,22 @@
-# InkBook - Classic E-Ink Reader for Android
+# InkBook - E-Ink Reader for Android
 
-A native Android e-book reader that replicates the look and feel of a classic
-6-inch e-ink e-reader: paper-gray screen, status bar with a book-title tab,
-true page turns, side page buttons, bottom hardware-style controls, and an
-optional e-ink refresh flash on every page change.
+A native Android e-book reader where **only the reading screen** replicates a
+classic 6-inch e-ink e-reader - paper-gray screen, status bar with a book-title
+tab, side page buttons, hardware-style bottom controls, and an authentic
+e-ink page-turn (quick dark blink + ghosting settle). Everything outside the
+reader (library, dialogs, system bars) looks and behaves like a normal,
+modern Android app.
 
 ## Features
 
+- **Modern library screen** - app bar, white book cards with cover thumbnails,
+  progress bars, FAB import, Material-style delete dialog
 - **TXT + EPUB** support (SAF import, no storage permissions needed)
 - True **pagination engine** (page-turn layout, not scrolling)
+- **E-ink page turn transition** - dark blink frame + ghost settle (toggleable)
 - **Tap zones** (left/right thirds), swipe, volume keys, and on-screen page buttons
 - **Long-press any word** for an instant Wiktionary definition (online)
-- **Gray / White / Night** themes
+- **Gray / White / Night** themes (inside the reader)
 - Font size, typeface (Sans/Serif/Mono), line spacing, justification settings
 - **Chapters** list, **Go to page** keypad, reading position saved per book
 - Formats ~10k paragraphs/sec in the background with a real "FORMATTING" screen
@@ -25,8 +30,8 @@ android/
   assets/sample.txt     pre-seeded sample book
   res/                  launcher icons (mipmap-*)
   src/com/inkbook/reader/
-    MainActivity.java   activity glue, SAF import, immersive mode
-    LibraryView.java    e-ink book shelf (canvas-drawn)
+    MainActivity.java   activity glue, SAF import, chrome switching (immersive in reader only)
+    LibraryView.java    modern library screen: cards, covers, FAB (canvas-drawn)
     ReaderView.java     reading screen (canvas-drawn) + all dialogs
     Paginator.java      wrap / paginate / render engine
     Book.java           TXT + EPUB parsing
