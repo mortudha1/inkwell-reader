@@ -1,0 +1,434 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Warm, paper-toned app palette */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.982 0.008 85);
+  --foreground: oklch(0.24 0.015 60);
+  --card: oklch(0.995 0.005 85);
+  --card-foreground: oklch(0.24 0.015 60);
+  --popover: oklch(0.995 0.005 85);
+  --popover-foreground: oklch(0.24 0.015 60);
+  --primary: oklch(0.32 0.03 55);
+  --primary-foreground: oklch(0.97 0.01 85);
+  --secondary: oklch(0.945 0.012 80);
+  --secondary-foreground: oklch(0.3 0.02 60);
+  --muted: oklch(0.945 0.012 80);
+  --muted-foreground: oklch(0.52 0.02 65);
+  --accent: oklch(0.93 0.025 75);
+  --accent-foreground: oklch(0.3 0.03 55);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.9 0.015 80);
+  --input: oklch(0.9 0.015 80);
+  --ring: oklch(0.68 0.09 60);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.97 0.01 85);
+  --sidebar-foreground: oklch(0.24 0.015 60);
+  --sidebar-primary: oklch(0.32 0.03 55);
+  --sidebar-primary-foreground: oklch(0.97 0.01 85);
+  --sidebar-accent: oklch(0.93 0.025 75);
+  --sidebar-accent-foreground: oklch(0.3 0.03 55);
+  --sidebar-border: oklch(0.9 0.015 80);
+  --sidebar-ring: oklch(0.68 0.09 60);
+}
+
+.dark {
+  --background: oklch(0.185 0.008 70);
+  --foreground: oklch(0.91 0.01 85);
+  --card: oklch(0.225 0.008 70);
+  --card-foreground: oklch(0.91 0.01 85);
+  --popover: oklch(0.225 0.008 70);
+  --popover-foreground: oklch(0.91 0.01 85);
+  --primary: oklch(0.87 0.03 80);
+  --primary-foreground: oklch(0.24 0.015 60);
+  --secondary: oklch(0.27 0.008 70);
+  --secondary-foreground: oklch(0.91 0.01 85);
+  --muted: oklch(0.27 0.008 70);
+  --muted-foreground: oklch(0.68 0.012 75);
+  --accent: oklch(0.29 0.012 70);
+  --accent-foreground: oklch(0.91 0.01 85);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.6 0.08 60);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.225 0.008 70);
+  --sidebar-foreground: oklch(0.91 0.01 85);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.91 0.01 85);
+  --sidebar-accent: oklch(0.29 0.012 70);
+  --sidebar-accent-foreground: oklch(0.91 0.01 85);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.6 0.08 60);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    overscroll-behavior: none;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ==========================================================================
+   Reader — themes
+   ========================================================================== */
+.reader-root {
+  --reader-accent: #b0702c;
+  transition:
+    background-color 0.35s ease,
+    color 0.35s ease;
+}
+
+.reader-theme-light {
+  --reader-bg: #ffffff;
+  --reader-fg: #26221b;
+  --reader-muted: #8b8478;
+  --reader-accent: #a5641f;
+  --reader-line: #e9e3d8;
+  --reader-sel: rgba(165, 100, 31, 0.28);
+  --reader-pop-bg: #fffdf8;
+  --reader-chrome-bg: rgba(255, 253, 248, 0.97);
+}
+
+.reader-theme-paper {
+  --reader-bg: #f3e9d7;
+  --reader-fg: #423726;
+  --reader-muted: #8d7e66;
+  --reader-accent: #9d5c1c;
+  --reader-line: #e1d3b7;
+  --reader-sel: rgba(157, 92, 28, 0.3);
+  --reader-pop-bg: #faf3e4;
+  --reader-chrome-bg: rgba(250, 243, 228, 0.97);
+}
+
+.reader-theme-sage {
+  --reader-bg: #ccd6c3;
+  --reader-fg: #2c382b;
+  --reader-muted: #5d6f5a;
+  --reader-accent: #4d6636;
+  --reader-line: #b1c1a6;
+  --reader-sel: rgba(77, 102, 54, 0.3);
+  --reader-pop-bg: #d8e1d0;
+  --reader-chrome-bg: rgba(216, 225, 208, 0.97);
+}
+
+.reader-theme-dark {
+  --reader-bg: #211f1b;
+  --reader-fg: #cfc9bd;
+  --reader-muted: #8f887a;
+  --reader-accent: #d9a05b;
+  --reader-line: #3b372f;
+  --reader-sel: rgba(217, 160, 91, 0.3);
+  --reader-pop-bg: #2b2823;
+  --reader-chrome-bg: rgba(33, 31, 27, 0.97);
+}
+
+.reader-theme-black {
+  --reader-bg: #000000;
+  --reader-fg: #b5afa5;
+  --reader-muted: #736e66;
+  --reader-accent: #d9a05b;
+  --reader-line: #232019;
+  --reader-sel: rgba(217, 160, 91, 0.3);
+  --reader-pop-bg: #12100d;
+  --reader-chrome-bg: rgba(12, 11, 9, 0.97);
+}
+
+/* ==========================================================================
+   Reader — content typography (classic book look)
+   ========================================================================== */
+.reader-flow {
+  color: var(--reader-fg);
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform;
+  orphans: 2;
+  widows: 2;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reader-flow {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}
+
+.reader-flow *::selection {
+  background: var(--reader-sel);
+  color: var(--reader-fg);
+}
+
+.reader-flow p {
+  margin: 0 0 0.42em;
+  text-indent: 1.5em;
+}
+
+.reader-flow > :first-child,
+.reader-flow h1 + p,
+.reader-flow h2 + p,
+.reader-flow h3 + p,
+.reader-flow h4 + p,
+.reader-flow h5 + p,
+.reader-flow h6 + p,
+.reader-flow hr + p,
+.reader-flow blockquote + p,
+.reader-flow ul + p,
+.reader-flow ol + p,
+.reader-flow img + p,
+.reader-flow div + p,
+.reader-flow table + p {
+  text-indent: 0;
+}
+
+.reader-flow h1,
+.reader-flow h2,
+.reader-flow h3,
+.reader-flow h4,
+.reader-flow h5,
+.reader-flow h6 {
+  font-weight: 600;
+  line-height: 1.22;
+  margin: 1em 0 0.55em;
+  text-indent: 0;
+}
+
+.reader-flow h1 {
+  font-size: 1.32em;
+  text-align: center;
+  margin-top: 0.3em;
+}
+
+.reader-flow h2 {
+  font-size: 1.18em;
+  text-align: center;
+}
+
+.reader-flow h3 {
+  font-size: 1.08em;
+}
+
+.reader-flow img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.6em auto;
+  object-fit: contain;
+}
+
+.reader-flow svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.reader-flow blockquote {
+  margin: 0.55em 1.1em;
+  padding-left: 0.85em;
+  border-left: 2px solid var(--reader-line);
+}
+
+.reader-flow hr {
+  border: 0;
+  margin: 1em 0;
+}
+
+.reader-flow hr::after {
+  content: "· · ·";
+  display: block;
+  text-align: center;
+  letter-spacing: 0.55em;
+  color: var(--reader-muted);
+  font-size: 0.85em;
+}
+
+.reader-flow ul,
+.reader-flow ol {
+  margin: 0.4em 0 0.5em 1.4em;
+  padding: 0;
+}
+
+.reader-flow li {
+  margin: 0.12em 0;
+}
+
+.reader-flow table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.92em;
+}
+
+.reader-flow td,
+.reader-flow th {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--reader-line);
+  text-align: left;
+}
+
+.reader-flow sup,
+.reader-flow sub {
+  font-size: 0.72em;
+}
+
+.reader-flow.justify p,
+.reader-flow.justify li {
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+.reader-flow.hyphens {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+/* ==========================================================================
+   Reader — UI helpers
+   ========================================================================== */
+.reader-serif,
+.reader-serif-aa {
+  font-family: var(--font-literata), Georgia, "Times New Roman", serif;
+}
+
+.reader-chrome {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.reader-skeleton {
+  background: color-mix(in srgb, var(--reader-muted) 24%, transparent);
+  animation: reader-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes reader-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.reader-pop {
+  animation: reader-pop-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+@keyframes reader-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.reader-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--reader-line) transparent;
+}
+
+/* themed vaul drawer grip (first child of DrawerContent) */
+.reader-sheet > div:first-child {
+  background: var(--reader-line) !important;
+}
+
+.reader-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.reader-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.reader-scroll::-webkit-scrollbar-thumb {
+  background: var(--reader-line);
+  border-radius: 999px;
+}
+
+.settings-label {
+  margin-bottom: 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.font-selected {
+  background: color-mix(in srgb, var(--reader-accent) 15%, transparent);
+}
+
+.font-unselected {
+  background: transparent;
+}
+
+.font-unselected:hover {
+  background: color-mix(in srgb, var(--reader-muted) 12%, transparent);
+}
+
+.toc-active {
+  background: color-mix(in srgb, var(--reader-accent) 13%, transparent);
+}
+
+/* thin custom scrollbars for app lists too */
+.lib-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
