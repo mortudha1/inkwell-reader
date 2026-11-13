@@ -1,10 +1,13 @@
 build/obj/com/inkbook/reader/LibraryView$2.class
+build/obj/com/inkbook/reader/ReaderView$SettingsOverlay$Slider.class
 build/obj/com/inkbook/reader/ReaderView$1.class
 build/obj/com/inkbook/reader/Paginator$LineToks.class
 build/obj/com/inkbook/reader/ReaderView$CloseListener.class
 build/obj/com/inkbook/reader/LibraryView$7.class
+build/obj/com/inkbook/reader/ReaderView$MarksOverlay$1.class
 build/obj/com/inkbook/reader/MainActivity.class
 build/obj/com/inkbook/reader/ReaderView$GoToOverlay.class
+build/obj/com/inkbook/reader/Prefs$BookSettings.class
 build/obj/com/inkbook/reader/ReaderView$SettingsOverlay.class
 build/obj/com/inkbook/reader/LibraryView$ShelfOverlay.class
 build/obj/com/inkbook/reader/Paginator.class
@@ -23,6 +26,8 @@ build/obj/com/inkbook/reader/LibraryView$4.class
 build/obj/com/inkbook/reader/Paginator$Page.class
 build/obj/com/inkbook/reader/LibraryView$5.class
 build/obj/com/inkbook/reader/LibraryView$1.class
+build/obj/com/inkbook/reader/ReaderView$DisplayOverlay.class
+build/obj/com/inkbook/reader/ReaderView$3.class
 build/obj/com/inkbook/reader/LibraryView$InfoOverlay.class
 build/obj/com/inkbook/reader/LibraryView.class
 build/obj/com/inkbook/reader/ReaderView$2$1$1.class
@@ -34,7 +39,6 @@ build/obj/com/inkbook/reader/Paginator$Word.class
 build/obj/com/inkbook/reader/EinkTheme.class
 build/obj/com/inkbook/reader/LibraryView$SortOverlay.class
 build/obj/com/inkbook/reader/LibraryView$BookActionsOverlay.class
-build/obj/com/inkbook/reader/ReaderView$MenuOverlay.class
 build/obj/com/inkbook/reader/MainActivity$2$1$1.class
 build/obj/com/inkbook/reader/ReaderView$DictOverlay$1.class
 build/obj/com/inkbook/reader/LibraryView$Host.class
@@ -46,11 +50,13 @@ build/obj/com/inkbook/reader/Prefs$Settings.class
 build/obj/com/inkbook/reader/MainActivity$2$1.class
 build/obj/com/inkbook/reader/MainActivity$2.class
 build/obj/com/inkbook/reader/Dict$1.class
+build/obj/com/inkbook/reader/ReaderView$MarksOverlay.class
 build/obj/com/inkbook/reader/ReaderView$DictOverlay.class
 build/obj/com/inkbook/reader/LibraryView$6.class
 build/obj/com/inkbook/reader/ReaderView$ChaptersOverlay.class
 build/obj/com/inkbook/reader/LibraryView$ConfirmOverlay.class
 build/obj/com/inkbook/reader/Dict.class
 build/obj/com/inkbook/reader/ReaderView$2$1.class
+build/obj/com/inkbook/reader/Prefs$Mark.class
 build/obj/com/inkbook/reader/Paginator$Line.class
 build/obj/com/inkbook/reader/ReaderView$Overlay.class

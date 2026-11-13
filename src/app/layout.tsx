@@ -54,11 +54,11 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Inkwell — eReader",
+  title: "InkBook — premium e-ink reader for Android tablets",
   description:
-    "A calm, Kindle-style e-reader. Import EPUB & TXT books, customize every detail of your page, and look up any word with a tap.",
-  keywords: ["e-reader", "epub reader", "books", "reading", "dictionary"],
-  applicationName: "Inkwell",
+    "A calm, tablet-first e-book reader for Android. True pagination, warm-paper themes, per-book typography, bookmarks, highlights and notes — like a printed novel on a BOOX E-Ink tablet.",
+  keywords: ["e-reader", "e-ink", "epub reader", "android", "books", "reading"],
+  applicationName: "InkBook",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/icons/icon-192.png",
@@ -67,7 +67,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Inkwell",
+    title: "InkBook",
   },
 };
 

@@ -45,7 +45,7 @@ public final class Paginator {
     private Paint paint;
     private Paint headPaint;
     private float bodyAscent, headAscent;
-    private float maxW, maxH, indent, lineH, headH, paraGap;
+    private float maxW, maxH, indent, lineH, headH, paraGap, headAfter;
     private boolean justify;
     private final ArrayList<LineToks> scratch = new ArrayList<LineToks>();
     private final List<int[]> pageStarts = new ArrayList<int[]>();
@@ -56,7 +56,7 @@ public final class Paginator {
     }
 
     public void configure(int width, int height, float fontPx, float spacingMult,
-                          int typeface, boolean justifyText) {
+                          int typeface, boolean justifyText, float paraGapFrac) {
         this.justify = justifyText;
         Typeface tf = Typeface.SANS_SERIF;
         if (typeface == 1) tf = Typeface.SERIF;
@@ -66,6 +66,7 @@ public final class Paginator {
         paint.setTextSize(fontPx);
         headPaint = new Paint(paint);
         headPaint.setFakeBoldText(true);
+        headPaint.setTextSize(fontPx * 1.28f);
         Paint.FontMetrics fm = paint.getFontMetrics();
         float fh = fm.descent - fm.ascent;
         bodyAscent = fm.ascent;
@@ -73,8 +74,11 @@ public final class Paginator {
         headAscent = hfm.ascent;
         lineH = fh * spacingMult;
         headH = (hfm.descent - hfm.ascent) * spacingMult;
-        paraGap = lineH * 0.34f;
-        indent = fontPx * 1.4f;
+        // adjustable paragraph gap: 0.12 .. 0.97 of one line height
+        paraGap = lineH * (0.12f + 0.85f * Math.max(0f, Math.min(1f, paraGapFrac)));
+        // breathing room under a chapter heading
+        headAfter = lineH * 0.62f;
+        indent = fontPx * 1.3f;
         maxW = Math.max(40f, width);
         maxH = Math.max(lineH, height);
         ready = false;
@@ -127,7 +131,7 @@ public final class Paginator {
                     freshPage = true;
                 }
                 y += h;
-                if (heading && ln == 0) y += paraGap * 0.5f;
+                if (heading && ln == lc - 1) y += headAfter;
             }
             y += paraGap;
             freshPage = false;
@@ -188,7 +192,7 @@ public final class Paginator {
                 pg.lines.add(blank);
             }
             y += h;
-            if (heading && ln == 0) y += paraGap * 0.5f;
+            if (heading && ln == lc - 1) y += headAfter;
             ln++;
             if (ln >= lc) {
                 y += paraGap;
@@ -216,7 +220,13 @@ public final class Paginator {
             return;
         }
         boolean first = (lineIdx == 0);
-        float xStart = (first && !heading) ? indent : 0f;
+        float xStart;
+        if (heading) {
+            // chapter headings are centered, book-style
+            xStart = Math.max(0f, (maxW - lt.w) / 2f);
+        } else {
+            xStart = first ? indent : 0f;
+        }
         float avail = maxW - xStart;
 
         float spaceW = p.measureText(" ");
@@ -253,7 +263,7 @@ public final class Paginator {
         out.clear();
         Paint p = heading ? headPaint : paint;
         float spaceW = p.measureText(" ");
-        float availFirst = maxW - indent;
+        float availFirst = heading ? maxW : maxW - indent;
         out.add(new LineToks());
         int len = text.length();
         int i = 0;

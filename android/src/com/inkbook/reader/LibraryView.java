@@ -960,7 +960,7 @@ public final class LibraryView extends View {
         pBody.setColor(INK);
         cv.drawText("Reading theme", x, y, pBody);
         y += dp(16);
-        String[] themes = {"Classic gray", "White paper", "Night"};
+        String[] themes = {"Warm paper", "White", "Dark"};
         for (int i = 0; i < themes.length; i++) {
             boolean on = settings.theme == i;
             // radio

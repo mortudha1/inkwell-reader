@@ -48,7 +48,7 @@ public final class EinkTheme {
     }
 
     public static EinkTheme theme(int idx) {
-        switch (Math.floorMod(idx, 3)) {
+        switch (((idx % 3) + 3) % 3) {
             case 1: // White paper
                 return new EinkTheme(
                         0xFFF7F5F0, 0xFF1C1C1B, 0xFF6F6D67, 0xFFEDEBE5, 0xFFE3E1DA, 0xFF1C1C1B,
