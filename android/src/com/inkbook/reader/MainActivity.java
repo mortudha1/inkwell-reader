@@ -74,8 +74,8 @@ public final class MainActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
                         | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         try {
-            getWindow().setStatusBarColor(0xFFF7F6F3);
-            getWindow().setNavigationBarColor(0xFFF7F6F3);
+            getWindow().setStatusBarColor(0xFFE5E5E5);
+            getWindow().setNavigationBarColor(0xFFE5E5E5);
         } catch (Exception ignored) { }
     }
 
@@ -118,6 +118,10 @@ public final class MainActivity extends Activity {
     // ------------------------------------------------------------ books
 
     private void openBook(final Prefs.BookEntry entry) {
+        if ("pdf".equalsIgnoreCase(entry.format)) {
+            Toast.makeText(this, "PDF reading is not supported on this build", Toast.LENGTH_LONG).show();
+            return;
+        }
         final File f = new File(getFilesDir(), "books/" + entry.fileName);
         if (!f.exists()) {
             Toast.makeText(this, "Book file is missing", Toast.LENGTH_LONG).show();
@@ -189,7 +193,8 @@ public final class MainActivity extends Activity {
             i.addCategory(Intent.CATEGORY_OPENABLE);
             i.setType("*/*");
             i.putExtra(Intent.EXTRA_MIME_TYPES,
-                    new String[]{"text/plain", "application/epub+zip", "application/octet-stream"});
+                    new String[]{"text/plain", "application/epub+zip", "application/pdf",
+                            "application/octet-stream"});
             startActivityForResult(i, REQ_OPEN);
         } catch (Exception e) {
             Toast.makeText(this, "File picker unavailable", Toast.LENGTH_LONG).show();
@@ -211,15 +216,16 @@ public final class MainActivity extends Activity {
         final String fmt;
         if (lower.endsWith(".epub")) fmt = "epub";
         else if (lower.endsWith(".txt")) fmt = "txt";
+        else if (lower.endsWith(".pdf")) fmt = "pdf";
         else {
-            Toast.makeText(this, "Only .txt and .epub files are supported", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Only .txt, .epub and .pdf files are supported", Toast.LENGTH_LONG).show();
             return;
         }
         try {
             File dir = new File(getFilesDir(), "books");
             if (!dir.exists()) dir.mkdirs();
             String fname = "bk_" + Long.toHexString(System.currentTimeMillis())
-                    + (fmt.equals("epub") ? ".epub" : ".txt");
+                    + (fmt.equals("epub") ? ".epub" : (fmt.equals("pdf") ? ".pdf" : ".txt"));
             File out = new File(dir, fname);
             InputStream in = getContentResolver().openInputStream(uri);
             if (in == null) throw new IllegalStateException("no stream");
@@ -232,10 +238,20 @@ public final class MainActivity extends Activity {
 
             Prefs.BookEntry e = new Prefs.BookEntry();
             e.id = "bk" + Long.toHexString(System.nanoTime());
-            e.title = name.replaceAll("\\.(txt|epub)$", "");
+            e.title = name.replaceAll("\\.(txt|epub|pdf)$", "");
             e.fileName = fname;
             e.format = fmt;
             e.addedAt = System.currentTimeMillis();
+            e.lastReadAt = 0;
+
+            // probe EPUB metadata for title / author without a full parse
+            if (fmt.equals("epub")) {
+                try {
+                    String[] meta = Book.epubMeta(out);
+                    if (meta[0].length() > 0) e.title = meta[0];
+                    e.author = meta[1];
+                } catch (Exception ignored) { }
+            }
 
             List<Prefs.BookEntry> list = prefs.library();
             list.add(0, e);

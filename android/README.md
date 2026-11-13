@@ -1,25 +1,35 @@
 # InkBook - E-Ink Reader for Android
 
-A native Android e-book reader where **only the reading screen** replicates a
-classic 6-inch e-ink e-reader - paper-gray screen, status bar with a book-title
-tab, side page buttons, hardware-style bottom controls, and an authentic
-e-ink page-turn (quick dark blink + ghosting settle). Everything outside the
-reader (library, dialogs, system bars) looks and behaves like a normal,
-modern Android app.
+A native Android e-book reader with two distinct faces:
+
+- **Library screen** replicates the BOOX Note Air e-reader software: strict
+  grayscale palette (#E5E5E5 background), fixed left navigation sidebar
+  (Library / Store / Notes / Storage / Apps / Settings) with a black selected
+tile, compact toolbar, 4-column document grid with thin-bordered covers,
+format chips, favorite stars, and a "Total: Bookshelves(N) / Books(M)" bottom
+bar with pagination.
+- **Reading screen** replicates a classic e-ink page: paper-gray screen, status
+bar with book-title tab, side page buttons, hardware-style bottom controls,
+and an authentic e-ink page-turn (dark blink + ghosting settle).
+
+No gradients, no color, no rounded cards - sharp corners and thin borders
+throughout the shell, just like the actual BOOX firmware.
 
 ## Features
 
-- **Modern library screen** - app bar, white book cards with cover thumbnails,
-  progress bars, FAB import, Material-style delete dialog
-- **TXT + EPUB** support (SAF import, no storage permissions needed)
-- True **pagination engine** (page-turn layout, not scrolling)
+- **BOOX-style library** - sidebar sections, toolbar (recent / shelves / cloud
+  / search / sort / view), 4-column grid, grayscale generated covers with
+  format chips (PDF / EPUB / TXT), check + favorite icons
+- **Search** filters books instantly (title or author)
+- **Sorting** by title, author, date added, recently opened
+- **Bookshelves** - create collections and organize books (long-press a book)
+- **Import TXT / EPUB / PDF** (SAF import, EPUB author metadata extraction)
+- **Storage / Apps / Settings** sections in BOOX visual style
+- True **pagination engine** for reading (page-turn layout, not scrolling)
 - **E-ink page turn transition** - dark blink frame + ghost settle (toggleable)
-- **Tap zones** (left/right thirds), swipe, volume keys, and on-screen page buttons
+- **Tap zones**, swipe, volume keys, and on-screen page buttons while reading
 - **Long-press any word** for an instant Wiktionary definition (online)
 - **Gray / White / Night** themes (inside the reader)
-- Font size, typeface (Sans/Serif/Mono), line spacing, justification settings
-- **Chapters** list, **Go to page** keypad, reading position saved per book
-- Formats ~10k paragraphs/sec in the background with a real "FORMATTING" screen
 
 ## Project layout
 
@@ -31,7 +41,7 @@ android/
   res/                  launcher icons (mipmap-*)
   src/com/inkbook/reader/
     MainActivity.java   activity glue, SAF import, chrome switching (immersive in reader only)
-    LibraryView.java    modern library screen: cards, covers, FAB (canvas-drawn)
+    LibraryView.java    BOOX-style library: sidebar, toolbar, grid, sections
     ReaderView.java     reading screen (canvas-drawn) + all dialogs
     Paginator.java      wrap / paginate / render engine
     Book.java           TXT + EPUB parsing

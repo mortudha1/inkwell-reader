@@ -15,8 +15,11 @@ public final class Prefs {
     public static class BookEntry {
         public String id = "";
         public String title = "";
+        public String author = "";
         public String fileName = "";
         public String format = "txt";
+        public String shelf = "";      // "" = not on a bookshelf
+        public boolean favorite = false;
         public long addedAt;
         public long lastReadAt;
         public int lastPara = -1;
@@ -80,8 +83,11 @@ public final class Prefs {
                 BookEntry e = new BookEntry();
                 e.id = o.optString("id");
                 e.title = o.optString("title");
+                e.author = o.optString("author");
                 e.fileName = o.optString("file");
                 e.format = o.optString("fmt", "txt");
+                e.shelf = o.optString("shelf");
+                e.favorite = o.optBoolean("fav", false);
                 e.addedAt = o.optLong("added");
                 e.lastReadAt = o.optLong("read");
                 e.lastPara = o.optInt("para", -1);
@@ -100,8 +106,11 @@ public final class Prefs {
                 JSONObject o = new JSONObject();
                 o.put("id", e.id);
                 o.put("title", e.title);
+                o.put("author", e.author);
                 o.put("file", e.fileName);
                 o.put("fmt", e.format);
+                o.put("shelf", e.shelf);
+                o.put("fav", e.favorite);
                 o.put("added", e.addedAt);
                 o.put("read", e.lastReadAt);
                 o.put("para", e.lastPara);
@@ -110,6 +119,29 @@ public final class Prefs {
                 a.put(o);
             }
             sp.edit().putString("library", a.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    /** Named bookshelves (collections). */
+    public List<String> shelves() {
+        List<String> out = new ArrayList<String>();
+        try {
+            JSONArray a = new JSONArray(sp.getString("shelves", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                String s = a.optString(i, "");
+                if (s.length() > 0) out.add(s);
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
+    public void saveShelves(List<String> shelves) {
+        try {
+            JSONArray a = new JSONArray();
+            for (String s : shelves) {
+                if (s != null && s.trim().length() > 0) a.put(s.trim());
+            }
+            sp.edit().putString("shelves", a.toString()).apply();
         } catch (Exception ignored) { }
     }
 

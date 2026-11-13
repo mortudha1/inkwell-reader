@@ -1,26 +1,31 @@
 package com.inkbook.reader;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.StatFs;
 import android.text.TextPaint;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.WindowManager;
+import android.widget.EditText;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Modern Android library screen: light app bar, white book cards with cover
- * thumbnails, progress bars and a floating action button. Deliberately looks
- * like a regular app - the e-ink styling lives only inside the reader screen.
+ * BOOX e-reader style library: grayscale UI, fixed left navigation sidebar,
+ * compact toolbar, 4-column document grid with thin-bordered covers, and a
+ * bottom statistics / pagination bar. Sharp corners everywhere, no color.
  */
 public final class LibraryView extends View {
 
@@ -30,82 +35,87 @@ public final class LibraryView extends View {
         void onDeleteBook(Prefs.BookEntry e);
     }
 
-    // ------------------------------------------------------------ palette
-    private static final int C_BG = 0xFFF7F6F3;          // warm light background
-    private static final int C_SURFACE = 0xFFFFFFFF;     // cards / app bar
-    private static final int C_HAIRLINE = 0xFFECEAE6;    // separators
-    private static final int C_TEXT = 0xFF1D1C1A;        // primary text
-    private static final int C_TEXT2 = 0xFF8B877E;       // secondary text
-    private static final int C_ACCENT = 0xFF1E5F4E;      // deep ink green
-    private static final int C_ACCENT_DARK = 0xFF174A3D; // FAB pressed
-    private static final int C_ACCENT_SOFT = 0xFFE3EFEA; // tonal button bg
-    private static final int C_TRACK = 0xFFE8E5DE;       // progress track
-    private static final int C_DANGER = 0xFFB3261E;      // delete action
-    private static final int C_SCRIM = 0x52000000;       // dialog scrim
-    private static final int C_PRESSED = 0xFFF1EFEA;     // card pressed
+    // ------------------------------------------------------- palette (e-ink)
+    private static final int BG = 0xFFE5E5E5;            // screen background
+    private static final int SIDEBAR_BG = 0xFFD9D9D9;    // slightly darker grey
+    private static final int INK = 0xFF171717;           // primary text / icons
+    private static final int INK2 = 0xFF5E5E5E;          // secondary text
+    private static final int HAIR = 0xFFADADAD;          // hairlines
+    private static final int PANEL = 0xFFF4F4F3;         // dialog surface
+    private static final int PANEL_HAIR = 0xFFC6C6C6;
+    private static final int COVER_BG = 0xFFF1F1F0;
+    private static final int COVER_BORDER = 0xFF3C3C3C;
+    private static final int SCRIM = 0x2E000000;
+    private static final int BLINK = 0xFF1B1B1B;
+    private static final int SEL = 0xFF171717;           // selected tile black
 
-    /** Muted book-cover colors, picked by title hash. */
-    private static final int[] COVER_COLORS = {
-            0xFFB3573F, 0xFF8A6D3B, 0xFF4E6E58, 0xFF58687A,
-            0xFF96545C, 0xFFA87B2F, 0xFF44646B, 0xFF6E5A46
+    // ------------------------------------------------------------ sections
+    static final int SEC_LIBRARY = 0;
+    static final int SEC_STORE = 1;
+    static final int SEC_NOTES = 2;
+    static final int SEC_STORAGE = 3;
+    static final int SEC_APPS = 4;
+    static final int SEC_SETTINGS = 5;
+
+    static final String[] SECTION_NAMES = {
+            "Library", "Store", "Notes", "Storage", "Apps", "Settings"
     };
 
-    private static final int[] COVER_DARKS = {
-            0xFF9A4832, 0xFF735A2F, 0xFF3F5A48, 0xFF48576A,
-            0xFF7E454C, 0xFF8C6726, 0xFF385259, 0xFF59493B
-    };
-
-    // ------------------------------------------------------------ fields
     private final Host host;
     private final Prefs prefs;
     private final Prefs.Settings settings;
     private final List<Prefs.BookEntry> books = new ArrayList<Prefs.BookEntry>();
+    private final List<Prefs.BookEntry> filtered = new ArrayList<Prefs.BookEntry>();
+    private List<String> shelves = new ArrayList<String>();
 
-    private final float dpf;
-    private final float touchSlop;
+    // ---------------------------------------------------------- grid state
+    private int cols = 4;
+    private int page = 0;
+    private int sortMode = 3;          // 0 title, 1 author, 2 added, 3 recently opened
+    private String query = "";
+    private String shelfFilter = null; // null = all books
 
+    // ---------------------------------------------------------- geometry
     private int W, H;
-    private float scroll = 0;
-    private float maxScroll = 0;
+    private float dpf, spf;
+    private float touchSlop;
+    private int statusH, sideW, toolH, bottomH;
+    private float contentL, gridTop, gridBot, coverW, coverH, cellH;
+    private int rows = 3, pageSize = 12, pageCount = 1;
 
-    private float downX, downY, lastMoveY;
-    private boolean moved;
-    private int pressedRow = -1;
-    private Prefs.BookEntry pendingDelete = null;
+    // ---------------------------------------------------------- interaction
+    private float downX, downY;
+    private boolean moved, longFired;
+    private int blinkFrames = 0;
+    private Overlay active = null;
+    private Prefs.BookEntry actionTarget = null;
+    private String pendingShelfFor = null; // entry id when creating shelf from add-to-shelf
 
-    private final RectF importBtn = new RectF();
-    private final RectF emptyBtn = new RectF();
-    private final RectF dlgCancel = new RectF();
-    private final RectF dlgDelete = new RectF();
-    private final ArrayList<RectF> rowRects = new ArrayList<RectF>();
+    private final ArrayList<float[]> sideHits = new ArrayList<float[]>();
+    private final ArrayList<float[]> toolHits = new ArrayList<float[]>();
+    private final ArrayList<float[]> coverHits = new ArrayList<float[]>();
+    private final ArrayList<float[]> bottomHits = new ArrayList<float[]>();
 
+    // ------------------------------------------------------------- paints
     private final Paint pFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pCard = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pFab = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pIcon = new Paint(Paint.ANTI_ALIAS_FLAG);
 
+    private final TextPaint pTime = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pLabel = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint pTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pMeta = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pCount = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pAppTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pCover = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pEmptyTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pEmptyBody = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pBtnText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pDlgTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pDlgBody = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint pDlgBtn = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-
-    private final Runnable longPressTask = new Runnable() {
-        public void run() {
-            if (pendingDelete != null) return;
-            if (pressedRow >= 0 && pressedRow < books.size()) {
-                pendingDelete = books.get(pressedRow);
-                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                invalidate();
-            }
-        }
-    };
+    private final TextPaint pAuthor = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pChip = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pBottom = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pHead = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pMenu = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pMenuTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pCoverSerif = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pCoverSerifIt = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pCoverSans = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pBody = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint pBody2 = new TextPaint(Paint.ANTI_ALIAS_FLAG);
 
     public LibraryView(Context c, Host host) {
         super(c);
@@ -113,67 +123,147 @@ public final class LibraryView extends View {
         this.prefs = new Prefs(c);
         this.settings = prefs.settings();
         dpf = Util.dp(c, 1f);
+        spf = Util.sp(c, 1f);
         touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
 
-        // software layer so Paint shadow layers render for cards / FAB
-        setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-
-        pCard.setShadowLayer(dpf * 5, 0, dpf * 2, 0x1A000000);
-        pFab.setShadowLayer(dpf * 12, 0, dpf * 4, 0x33000000);
+        pStroke.setStyle(Paint.Style.STROKE);
         pLine.setStyle(Paint.Style.FILL);
+        pIcon.setStyle(Paint.Style.STROKE);
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        pIcon.setStrokeCap(Paint.Cap.ROUND);
+        pIcon.setStrokeJoin(Paint.Join.MITER);
 
-        pAppTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pAppTitle.setTextSize(Util.sp(c, 22));
-        pCount.setTextSize(Util.sp(c, 13));
+        pTime.setTextSize(spf * 11.5f);
+        pLabel.setTextAlign(Paint.Align.CENTER);
+        pLabel.setTextSize(spf * 10f);
+        pTitle.setTextSize(spf * 13f);
+        pAuthor.setTextSize(spf * 11f);
+        pAuthor.setColor(INK2);
+        pChip.setTypeface(Typeface.DEFAULT_BOLD);
+        pChip.setTextSize(spf * 8f);
+        pChip.setTextAlign(Paint.Align.CENTER);
+        pBottom.setTextSize(spf * 13f);
+        pHead.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        pHead.setTextSize(spf * 17f);
+        pMenu.setTextSize(spf * 14f);
+        pMenuTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        pMenuTitle.setTextSize(spf * 15f);
+        pBody.setTextSize(spf * 14f);
+        pBody2.setTextSize(spf * 12.5f);
+        pBody2.setColor(INK2);
 
-        pTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pTitle.setTextSize(Util.sp(c, 16));
-
-        pMeta.setTextSize(Util.sp(c, 12.5f));
-        pCount.setColor(C_TEXT2);
-        pMeta.setColor(C_TEXT2);
-
-        pCover.setTypeface(Typeface.create("serif", Typeface.BOLD));
-        pCover.setTextSize(Util.sp(c, 22));
-        pCover.setTextAlign(Paint.Align.CENTER);
-
-        pEmptyTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pEmptyTitle.setTextSize(Util.sp(c, 17));
-        pEmptyTitle.setTextAlign(Paint.Align.CENTER);
-        pEmptyBody.setTextSize(Util.sp(c, 13.5f));
-        pEmptyBody.setTextAlign(Paint.Align.CENTER);
-
-        pBtnText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pBtnText.setTextSize(Util.sp(c, 14));
-        pBtnText.setTextAlign(Paint.Align.CENTER);
-
-        pDlgTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pDlgTitle.setTextSize(Util.sp(c, 19));
-        pDlgBody.setTextSize(Util.sp(c, 14));
-
-        pDlgBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        pDlgBtn.setTextSize(Util.sp(c, 14));
-        pDlgBtn.setTextAlign(Paint.Align.CENTER);
+        pCoverSerif.setTypeface(Typeface.create("serif", Typeface.NORMAL));
+        pCoverSerif.setTextSize(spf * 13f);
+        pCoverSerif.setTextAlign(Paint.Align.CENTER);
+        pCoverSerifIt.setTypeface(Typeface.create("serif", Typeface.ITALIC));
+        pCoverSerifIt.setTextSize(spf * 14f);
+        pCoverSerifIt.setTextAlign(Paint.Align.CENTER);
+        pCoverSans.setTextAlign(Paint.Align.CENTER);
+        pCoverSans.setTextSize(spf * 11f);
     }
+
+    // ------------------------------------------------------------- data
 
     public void refresh() {
-        List<Prefs.BookEntry> list = prefs.library();
-        Collections.sort(list, new Comparator<Prefs.BookEntry>() {
-            public int compare(Prefs.BookEntry a, Prefs.BookEntry b) {
-                if (a.lastReadAt != b.lastReadAt) return a.lastReadAt > b.lastReadAt ? -1 : 1;
-                return a.addedAt > b.addedAt ? -1 : 1;
-            }
-        });
         books.clear();
-        books.addAll(list);
-        scroll = 0;
+        books.addAll(prefs.library());
+        shelves = prefs.shelves();
+        rebuild();
         invalidate();
     }
+
+    private void saveBooks() {
+        prefs.saveLibrary(books);
+    }
+
+    private void rebuild() {
+        filtered.clear();
+        String q = query.toLowerCase(Locale.US);
+        for (Prefs.BookEntry e : books) {
+            if (shelfFilter != null && !shelfFilter.equals(e.shelf)) continue;
+            if (q.length() > 0
+                    && !e.title.toLowerCase(Locale.US).contains(q)
+                    && !e.author.toLowerCase(Locale.US).contains(q)) {
+                continue;
+            }
+            filtered.add(e);
+        }
+        sortFiltered();
+        clampPage();
+    }
+
+    private void sortFiltered() {
+        final int m = sortMode;
+        java.util.Collections.sort(filtered, new java.util.Comparator<Prefs.BookEntry>() {
+            public int compare(Prefs.BookEntry a, Prefs.BookEntry b) {
+                if (m == 0) return a.title.toLowerCase(Locale.US)
+                        .compareTo(b.title.toLowerCase(Locale.US));
+                if (m == 1) {
+                    if (a.author.length() == 0 && b.author.length() > 0) return 1;
+                    if (b.author.length() == 0 && a.author.length() > 0) return -1;
+                    return a.author.toLowerCase(Locale.US)
+                            .compareTo(b.author.toLowerCase(Locale.US));
+                }
+                if (m == 2) return a.addedAt > b.addedAt ? -1 : (a.addedAt < b.addedAt ? 1 : 0);
+                long ra = a.lastReadAt == 0 ? -1 : a.lastReadAt;
+                long rb = b.lastReadAt == 0 ? -1 : b.lastReadAt;
+                return ra > rb ? -1 : (ra < rb ? 1 : 0);
+            }
+        });
+    }
+
+    private void clampPage() {
+        pageSize = Math.max(1, rows * cols);
+        pageCount = Math.max(1, (filtered.size() + pageSize - 1) / pageSize);
+        if (page > pageCount - 1) page = pageCount - 1;
+        if (page < 0) page = 0;
+    }
+
+    private void setQuery(String q) {
+        query = q == null ? "" : q;
+        page = 0;
+        computeGeometry();
+        rebuild();
+        invalidate();
+    }
+
+    // ---------------------------------------------------------- geometry
 
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         W = w;
         H = h;
+        computeGeometry();
+    }
+
+    private void computeGeometry() {
+        statusH = (int) dp(30);
+        sideW = (int) (W < dp(480) ? dp(58) : dp(76));
+        toolH = (int) dp(46);
+        bottomH = (int) dp(44);
+        contentL = sideW;
+
+        float gridTopBase = statusH + toolH + dp(12);
+        float extra = (query.length() > 0) ? dp(34) : 0;
+        gridTop = gridTopBase + extra;
+        gridBot = H - bottomH - dp(6);
+
+        float contentW = W - contentL;
+        float pad = dp(18);
+        float gap = dp(20);
+        coverW = (contentW - pad * 2 - gap * (cols - 1)) / cols;
+        if (coverW < dp(56)) coverW = dp(56);
+        coverH = coverW * 1.30f;
+        float titleH = dp(17) * 2;
+        float authorH = dp(14);
+        cellH = coverH + dp(7) + titleH + authorH + dp(14);
+
+        float avail = gridBot - gridTop;
+        rows = (int) (avail / cellH);
+        if (rows < 1) rows = 1;
+        if (rows > 6) rows = 6;
+        pageSize = rows * cols;
+        clampPage();
     }
 
     private float dp(float v) {
@@ -184,239 +274,1147 @@ public final class LibraryView extends View {
 
     @Override
     protected void onDraw(Canvas cv) {
-        cv.drawColor(C_BG);
+        if (blinkFrames > 0) {
+            blinkFrames--;
+            cv.drawColor(BLINK);
+            postInvalidateDelayed(50);
+            return;
+        }
+        // reset shared stroke widths (some helpers change them)
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawColor(BG);
 
-        drawAppBar(cv, W);
+        sideHits.clear();
+        toolHits.clear();
+        coverHits.clear();
+        bottomHits.clear();
 
-        float listTop = dp(76);
-        float listBot = H - dp(96);
+        drawStatusBar(cv);
+        drawSidebar(cv);
 
-        if (books.isEmpty()) {
-            drawEmptyState(cv, listTop, listBot);
+        if (section() == SEC_LIBRARY) {
+            drawToolbar(cv);
+            drawGrid(cv);
+            drawBottomBar(cv);
         } else {
-            drawBookList(cv, listTop, listBot);
+            drawSection(cv);
         }
 
-        drawFab(cv);
-
-        if (pendingDelete != null) drawDeleteDialog(cv);
+        if (active != null) active.draw(cv);
     }
 
-    private void drawAppBar(Canvas cv, int w) {
-        pFill.setColor(C_SURFACE);
-        cv.drawRect(0, 0, w, dp(64), pFill);
-        pLine.setColor(C_HAIRLINE);
-        cv.drawRect(0, dp(64), w, dp(64) + dpf, pLine);
-
-        pAppTitle.setColor(C_TEXT);
-        cv.drawText("InkBook", dp(20), dp(40), pAppTitle);
-
-        String count = books.size() + (books.size() == 1 ? " book" : " books");
-        pCount.setColor(C_TEXT2);
-        float cw = pCount.measureText(count);
-        cv.drawText(count, w - dp(20) - cw, dp(40), pCount);
+    private int section() {
+        return currentSection;
     }
 
-    private void drawBookList(Canvas cv, float listTop, float listBot) {
-        rowRects.clear();
-        float rowH = dp(96);
-        float gap = dp(12);
-        float contentH = books.size() * (rowH + gap);
-        maxScroll = Math.max(0, contentH - (listBot - listTop));
-        if (scroll > maxScroll) scroll = maxScroll;
-        if (scroll < 0) scroll = 0;
+    private int currentSection = SEC_LIBRARY;
 
-        cv.save();
-        cv.clipRect(0, listTop, W, listBot);
-        float y = listTop - scroll;
-        for (int i = 0; i < books.size(); i++) {
-            if (y + rowH < listTop) { y += rowH + gap; continue; }
-            if (y > listBot) break;
-            RectF r = new RectF(dp(16), y, W - dp(16), y + rowH);
-            rowRects.add(r);
-            drawBookCard(cv, r, books.get(i), i == pressedRow);
-            y += rowH + gap;
-        }
-        cv.restore();
+    // ---------------------------------------------------------- status bar
 
-        if (maxScroll > 0) {
-            float trackH = listBot - listTop;
-            float thumbH = Math.max(dp(48), trackH * (trackH / contentH));
-            float thumbY = listTop + (trackH - thumbH) * (scroll / maxScroll);
-            pFill.setColor(0x3A000000);
-            cv.drawRoundRect(new RectF(W - dpf * 6, thumbY, W - dpf * 3, thumbY + thumbH),
-                    dpf * 2, dpf * 2, pFill);
+    private void drawStatusBar(Canvas cv) {
+        pTime.setColor(INK);
+        cv.drawText(Util.clock12(), dp(10), statusH / 2f + spf * 4, pTime);
+
+        float x = W - dp(10);
+        // "83%" + battery
+        String pct = Util.batteryPct(getContext()) + "%";
+        float pw = pTime.measureText(pct);
+        cv.drawText(pct, x - pw, statusH / 2f + spf * 4, pTime);
+        x -= pw + dp(5);
+        float bs = dp(7);
+        drawBattery(cv, x - bs, statusH / 2f, bs);
+        x -= bs + dp(13);
+        drawWifi(cv, x, statusH / 2f, dp(8));
+        x -= dp(24);
+        drawBluetooth(cv, x, statusH / 2f, dp(8));
+        x -= dp(24);
+        drawMute(cv, x, statusH / 2f, dp(9));
+        x -= dp(24);
+        drawRotate(cv, x, statusH / 2f, dp(9));
+
+        pLine.setColor(HAIR);
+        cv.drawRect(0, statusH, W, statusH + dpf, pLine);
+    }
+
+    private void drawBattery(Canvas cv, float x0, float cy, float s) {
+        float h = s * 1.15f;
+        float bodyW = s * 1.7f;
+        float y0 = cy - h / 2f;
+        pStroke.setColor(INK);
+        pStroke.setStrokeWidth(dpf * 1.2f);
+        cv.drawRect(x0, y0, x0 + bodyW, y0 + h, pStroke);
+        cv.drawRect(x0 + bodyW + dpf, y0 + h * 0.3f, x0 + bodyW + dpf * 2.4f,
+                y0 + h * 0.7f, pStroke);
+        int pct = Util.batteryPct(getContext());
+        pFill.setColor(INK);
+        float iw = (bodyW - dpf * 3) * pct / 100f;
+        cv.drawRect(x0 + dpf * 1.5f, y0 + dpf * 1.5f, x0 + dpf * 1.5f + iw,
+                y0 + h - dpf * 1.5f, pFill);
+    }
+
+    private void drawWifi(Canvas cv, float cx, float cy, float s) {
+        pIcon.setColor(INK);
+        pFill.setColor(INK);
+        cv.drawCircle(cx, cy + s * 0.45f, dpf * 1.3f, pFill);
+        pIcon.setStrokeWidth(dpf * 1.4f);
+        for (int k = 1; k <= 2; k++) {
+            float r = s * 0.36f * k;
+            cv.drawArc(new RectF(cx - r, cy + s * 0.45f - r * 1.6f,
+                    cx + r, cy + s * 0.45f + r * 0.4f), 215f, 110f, false, pIcon);
         }
     }
 
-    private void drawBookCard(Canvas cv, RectF r, Prefs.BookEntry e, boolean pressed) {
-        pCard.setColor(pressed ? C_PRESSED : C_SURFACE);
-        cv.drawRoundRect(r, dp(14), dp(14), pCard);
-
-        // cover thumbnail
-        int idx = Math.abs(e.title.hashCode()) % COVER_COLORS.length;
-        RectF cover = new RectF(r.left + dp(16), r.top + dp(16),
-                r.left + dp(16) + dp(48), r.top + dp(16) + dp(64));
-        pFill.setColor(pressed ? COVER_DARKS[idx] : COVER_COLORS[idx]);
-        cv.drawRoundRect(cover, dp(8), dp(8), pFill);
-
-        // spine accents
-        pFill.setColor(0x33FFFFFF);
-        cv.drawRoundRect(new RectF(cover.left + dp(4), cover.top + dp(4),
-                cover.left + dp(6), cover.bottom - dp(4)), dpf, dpf, pFill);
-
-        String letter = (e.title == null || e.title.length() == 0)
-                ? "?" : e.title.substring(0, 1).toUpperCase();
-        pCover.setColor(0xE6FFFFFF);
-        cv.drawText(letter, cover.centerX(), cover.centerY()
-                - (pCover.ascent() + pCover.descent()) / 2f, pCover);
-
-        // text column
-        float tx = cover.right + dp(16);
-        float tw = r.right - dp(44) - tx;
-
-        CharSequence title = TextUtils.ellipsize(e.title, pTitle, tw, TextUtils.TruncateAt.END);
-        pTitle.setColor(C_TEXT);
-        cv.drawText(title.toString(), tx, r.top + dp(36), pTitle);
-
-        String fmt = e.format == null ? "" : e.format.toUpperCase();
-        String meta;
-        if (e.totalPages > 0 && e.lastPara >= 0) {
-            meta = fmt + "  \u00B7  Page " + (e.lastPage + 1) + " of " + e.totalPages;
-        } else {
-            meta = fmt + "  \u00B7  Not started yet";
-        }
-        CharSequence metaEl = TextUtils.ellipsize(meta, pMeta, tw, TextUtils.TruncateAt.END);
-        pMeta.setColor(C_TEXT2);
-        cv.drawText(metaEl.toString(), tx, r.top + dp(58), pMeta);
-
-        // progress bar
-        if (e.totalPages > 0 && e.lastPara >= 0) {
-            int pct = Math.max(0, Math.min(100, (e.lastPage + 1) * 100 / Math.max(1, e.totalPages)));
-            float barY = r.top + dp(72);
-            float barW = r.right - dp(64) - tx;
-            pFill.setColor(C_TRACK);
-            cv.drawRoundRect(new RectF(tx, barY, tx + barW, barY + dp(4)), dp(2), dp(2), pFill);
-            pFill.setColor(C_ACCENT);
-            cv.drawRoundRect(new RectF(tx, barY, tx + Math.max(dp(6), barW * pct / 100f),
-                    barY + dp(4)), dp(2), dp(2), pFill);
-            pCount.setColor(C_TEXT2);
-            String pctS = pct + "%";
-            cv.drawText(pctS, r.right - dp(16) - pCount.measureText(pctS), barY + dp(5), pCount);
-        }
-
-        // chevron
-        pMeta.setColor(0xFFB9B4AA);
-        cv.drawText("\u203A", r.right - dp(24), r.centerY()
-                - (pMeta.ascent() + pMeta.descent()) / 2f, pMeta);
+    private void drawBluetooth(Canvas cv, float cx, float cy, float s) {
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.4f);
+        float h = s * 0.9f;
+        cv.drawLine(cx, cy - h / 2f, cx, cy + h / 2f, pIcon);
+        cv.drawLine(cx, cy - h / 2f, cx + h * 0.38f, cy - h * 0.18f, pIcon);
+        cv.drawLine(cx, cy + h / 2f, cx + h * 0.38f, cy + h * 0.18f, pIcon);
+        cv.drawLine(cx + h * 0.38f, cy - h * 0.18f, cx - h * 0.38f, cy + h * 0.30f, pIcon);
+        cv.drawLine(cx - h * 0.38f, cy - h * 0.30f, cx + h * 0.38f, cy + h * 0.18f, pIcon);
     }
 
-    private void drawFab(Canvas cv) {
-        float fab = dp(56);
-        importBtn.set(W - dp(20) - fab, H - dp(28) - fab, W - dp(20), H - dp(28));
-        pFab.setColor(pressedRow == -2 ? C_ACCENT_DARK : C_ACCENT);
-        cv.drawCircle(importBtn.centerX(), importBtn.centerY(), fab / 2f, pFab);
+    private void drawMute(Canvas cv, float cx, float cy, float s) {
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.3f);
+        float h = s * 0.8f;
+        // speaker
+        pFill.setColor(INK);
+        cv.drawRect(cx - s * 0.55f, cy - h * 0.28f, cx - s * 0.25f, cy + h * 0.28f, pFill);
+        Path tri = new Path();
+        tri.moveTo(cx - s * 0.25f, cy - h * 0.42f);
+        tri.lineTo(cx + s * 0.05f, cy - h * 0.72f);
+        tri.lineTo(cx + s * 0.05f, cy + h * 0.72f);
+        tri.lineTo(cx - s * 0.25f, cy + h * 0.42f);
+        tri.close();
+        cv.drawPath(tri, pFill);
+        // mute x
+        pIcon.setStrokeWidth(dpf * 1.4f);
+        cv.drawLine(cx + s * 0.22f, cy - h * 0.3f, cx + s * 0.6f, cy + h * 0.3f, pIcon);
+        cv.drawLine(cx + s * 0.6f, cy - h * 0.3f, cx + s * 0.22f, cy + h * 0.3f, pIcon);
+    }
 
-        // plus glyph
+    private void drawRotate(Canvas cv, float cx, float cy, float s) {
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.3f);
+        RectF r = new RectF(cx - s * 0.5f, cy - s * 0.62f, cx + s * 0.5f, cy + s * 0.38f);
+        cv.drawRect(r, pIcon);
+        pFill.setColor(INK);
+        cv.drawCircle(cx + s * 0.42f, cy + s * 0.52f, dpf * 1.7f, pFill);
+    }
+
+    // -------------------------------------------------------------- sidebar
+
+    private void drawSidebar(Canvas cv) {
+        pFill.setColor(SIDEBAR_BG);
+        cv.drawRect(0, statusH + dpf, sideW, H, pFill);
+        pLine.setColor(HAIR);
+        cv.drawRect(sideW, statusH + dpf, sideW + dpf, H, pLine);
+
+        float tileW = sideW - dp(12);
+        float tileH = W < dp(480) ? dp(56) : dp(64);
+        float x0 = (sideW - tileW) / 2f;
+        float y = statusH + dp(10);
+        float step = tileH + dp(12);
+
+        int[] secs = {SEC_LIBRARY, SEC_STORE, SEC_NOTES, SEC_STORAGE, SEC_APPS};
+        for (int i = 0; i < secs.length; i++) {
+            drawSideTile(cv, x0, y, tileW, tileH, secs[i], SECTION_NAMES[secs[i]],
+                    section() == secs[i]);
+            sideHits.add(new float[]{x0, y, x0 + tileW, y + tileH, secs[i]});
+            y += step;
+        }
+        float sy = H - tileH - dp(12);
+        drawSideTile(cv, x0, sy, tileW, tileH, SEC_SETTINGS, "Settings",
+                section() == SEC_SETTINGS);
+        sideHits.add(new float[]{x0, sy, x0 + tileW, sy + tileH, SEC_SETTINGS});
+    }
+
+    private void drawSideTile(Canvas cv, float x, float y, float w, float h,
+                              int sec, String label, boolean selected) {
+        if (selected) {
+            pFill.setColor(SEL);
+            cv.drawRoundRect(new RectF(x, y, x + w, y + h), dp(2), dp(2), pFill);
+        }
+        float cx = x + w / 2f;
+        float iconCy = y + h * 0.40f;
+        float s = dp(22);
+        pIcon.setColor(selected ? 0xFFF2F2F2 : INK);
+        switch (sec) {
+            case SEC_LIBRARY: iconBook(cv, cx, iconCy, s); break;
+            case SEC_STORE: iconStore(cv, cx, iconCy, s); break;
+            case SEC_NOTES: iconNotes(cv, cx, iconCy, s); break;
+            case SEC_STORAGE: iconStorage(cv, cx, iconCy, s); break;
+            case SEC_APPS: iconApps(cv, cx, iconCy, s); break;
+            default: iconGear(cv, cx, iconCy, s); break;
+        }
+        pLabel.setColor(selected ? 0xFFF2F2F2 : INK);
+        cv.drawText(label, cx, y + h * 0.40f + s / 2f + dp(13), pLabel);
+    }
+
+    // -------------------------------------------------------------- toolbar
+
+    private void drawToolbar(Canvas cv) {
+        float cy = statusH + toolH / 2f;
+        float s = dp(21);
+        pIcon.setColor(INK);
+
+        float x = contentL + dp(20);
+        for (int i = 0; i < 3; i++) {
+            if (i == 0) iconClock(cv, x, cy, s);
+            else if (i == 1) iconColumns(cv, x, cy, s);
+            else iconCloud(cv, x, cy, s);
+            toolHits.add(new float[]{x - dp(15), cy - dp(15), x + dp(15), cy + dp(15), i});
+            x += dp(34);
+        }
+
+        float xr = W - dp(20);
+        for (int i = 0; i < 3; i++) {
+            int action = (i == 0) ? 10 : (i == 1 ? 11 : 12); // 10 search, 11 sort, 12 view
+            if (i == 0) iconSearch(cv, xr, cy, s);
+            else if (i == 1) iconSort(cv, xr, cy, s);
+            else iconView(cv, xr, cy, s);
+            toolHits.add(new float[]{xr - dp(15), cy - dp(15), xr + dp(15), cy + dp(15), action});
+            xr -= dp(34);
+        }
+    }
+
+    // ----------------------------------------------------------------- grid
+
+    private void drawGrid(Canvas cv) {
+        float pad = dp(18);
+        float gap = dp(20);
+        float contentW = W - contentL;
+
+        // active search chip
+        if (query.length() > 0) {
+            drawSearchChip(cv, contentL + pad, statusH + toolH + dp(8));
+        }
+
+        if (filtered.isEmpty()) {
+            drawEmptyGrid(cv);
+            return;
+        }
+
+        int start = page * pageSize;
+        for (int i = start; i < filtered.size() && i < start + pageSize; i++) {
+            int k = i - start;
+            int r = k / cols;
+            int c = k % cols;
+            float x = contentL + pad + c * (coverW + gap);
+            float y = gridTop + r * cellH;
+            Prefs.BookEntry e = filtered.get(i);
+            drawCover(cv, e, x, y, coverW, coverH);
+            coverHits.add(new float[]{x, y, x + coverW, y + coverH, i});
+            drawCoverText(cv, e, x, y + coverH + dp(7));
+        }
+    }
+
+    private void drawSearchChip(Canvas cv, float x, float y) {
+        float h = dp(26);
+        float tw = pBody2.measureText("Search: \"" + query + "\"");
+        float w = tw + dp(40);
+        if (w > W - contentL - dp(36)) w = W - contentL - dp(36);
+        pFill.setColor(PANEL);
+        cv.drawRect(x, y, x + w, y + h, pFill);
+        pStroke.setColor(COVER_BORDER);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRect(x, y, x + w, y + h, pStroke);
+        CharSequence t = TextUtils.ellipsize("Search: \"" + query + "\"", pBody2, w - dp(38),
+                TextUtils.TruncateAt.END);
+        pBody2.setColor(INK);
+        cv.drawText(t.toString(), x + dp(10), y + h / 2f + spf * 4.4f, pBody2);
+        // X
+        float bx = x + w - dp(15);
+        float by = y + h / 2f;
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.6f);
+        cv.drawLine(bx - dp(4), by - dp(4), bx + dp(4), by + dp(4), pIcon);
+        cv.drawLine(bx + dp(4), by - dp(4), bx - dp(4), by + dp(4), pIcon);
+        bottomHits.add(new float[]{x + w - dp(24), y, x + w, y + h, 60});
+    }
+
+    private void drawEmptyGrid(Canvas cv) {
+        float cx = (contentL + W) / 2f;
+        float cy = (gridTop + gridBot) / 2f;
+        pIcon.setColor(0xFF9A9A9A);
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        iconBook(cv, cx, cy - dp(38), dp(40));
+        pHead.setColor(INK);
+        pHead.setTextAlign(Paint.Align.CENTER);
+        cv.drawText("No books", cx, cy + dp(4), pHead);
+        pHead.setTextAlign(Paint.Align.LEFT);
+        String sub = (query.length() > 0 || shelfFilter != null)
+                ? "Nothing matches the current filter."
+                : "Import TXT, EPUB or PDF files to fill the bookshelf.";
+        pBody2.setTextAlign(Paint.Align.CENTER);
+        cv.drawText(sub, cx, cy + dp(26), pBody2);
+        pBody2.setTextAlign(Paint.Align.LEFT);
+    }
+
+    // ---------------------------------------------------------------- cover
+
+    private void drawCover(Canvas cv, Prefs.BookEntry e, float x, float y, float w, float h) {
+        RectF r = new RectF(x, y, x + w, y + h);
+        int hash = Math.abs(e.title.hashCode());
+        int variant;
+        String fmt = e.format == null ? "txt" : e.format.toLowerCase(Locale.US);
+        if (fmt.equals("txt")) variant = 0;
+        else if (fmt.equals("pdf")) variant = 2;
+        else variant = 1 + (hash % 3); // epub / other: dark art, classic, dark minimal
+
+        switch (variant) {
+            case 0: drawCoverChevrons(cv, r, e); break;
+            case 1: drawCoverDarkArt(cv, r, e); break;
+            case 2: drawCoverClassic(cv, r, e); break;
+            default: drawCoverDarkMin(cv, r, e); break;
+        }
+
+        // thin border
+        pStroke.setColor(COVER_BORDER);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRect(r, pStroke);
+
+        // footer: format chip (left), check + star (right)
+        String chip = fmt.toUpperCase(Locale.US);
+        float chipW = pChip.measureText(chip) + dp(8);
+        float chipH = dp(11);
+        float chipY = r.bottom - chipH - dp(3);
         pFill.setColor(0xFFFFFFFF);
-        float cx = importBtn.centerX();
-        float cy = importBtn.centerY();
-        float arm = dp(9);
-        float th = dp(2.6f);
-        RectF hbar = new RectF(cx - arm, cy - th / 2f, cx + arm, cy + th / 2f);
-        RectF vbar = new RectF(cx - th / 2f, cy - arm, cx + th / 2f, cy + arm);
-        cv.drawRoundRect(hbar, th, th, pFill);
-        cv.drawRoundRect(vbar, th, th, pFill);
+        cv.drawRect(r.left + dp(3), chipY, r.left + dp(3) + chipW, chipY + chipH, pFill);
+        pStroke.setColor(COVER_BORDER);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRect(r.left + dp(3), chipY, r.left + dp(3) + chipW, chipY + chipH, pStroke);
+        pChip.setColor(INK);
+        cv.drawText(chip, r.left + dp(3) + chipW / 2f, chipY + chipH / 2f + spf * 2.9f, pChip);
+
+        float fy = r.bottom - dp(10.5f);
+        float sx = r.right - dp(12);
+        drawStar(cv, sx, fy, dp(4.6f), e.favorite);
+        float chx = sx - dp(16);
+        drawCheckCircle(cv, chx, fy, dp(4.6f));
     }
 
-    private void drawEmptyState(Canvas cv, float top, float bottom) {
-        float cx = W / 2f;
-        float cy = (top + bottom) / 2f - dp(70);
+    /** Light placeholder with big chevrons, like reference PPTX/DOC/TXT docs. */
+    private void drawCoverChevrons(Canvas cv, RectF r, Prefs.BookEntry e) {
+        pFill.setColor(0xFFE9E9E8);
+        cv.drawRect(r, pFill);
+        // top text bars
+        pFill.setColor(0xFFC6C6C6);
+        cv.drawRect(r.left + dp(8), r.top + dp(8), r.left + dp(8) + r.width() * 0.52f,
+                r.top + dp(12), pFill);
+        cv.drawRect(r.left + dp(8), r.top + dp(15), r.left + dp(8) + r.width() * 0.34f,
+                r.top + dp(19), pFill);
+        // big left-pointing chevrons
+        float mx = r.centerX() + r.width() * 0.10f;
+        float my = r.centerY() + dp(2);
+        float cw = r.width() * 0.34f;
+        float chh = r.height() * 0.26f;
+        Path big = chevronPath(mx + cw * 0.4f, my, cw, chh);
+        pFill.setColor(0xFFBDBDBD);
+        cv.drawPath(big, pFill);
+        Path small = chevronPath(mx - cw * 0.42f, my, cw * 0.72f, chh * 0.86f);
+        pFill.setColor(0xFFD2D2D1);
+        cv.drawPath(small, pFill);
+        // bottom-left solid block
+        pFill.setColor(0xFFD8D8D7);
+        cv.drawRect(r.left + dp(7), r.bottom - dp(22), r.left + dp(7) + r.width() * 0.42f,
+                r.bottom - dp(16), pFill);
+    }
 
-        // illustration: soft circle with an open-book glyph
-        float rad = dp(64);
-        pFill.setColor(0xFFEFEDE8);
-        cv.drawCircle(cx, cy, rad, pFill);
+    private Path chevronPath(float cx, float cy, float w, float h) {
+        Path p = new Path();
+        p.moveTo(cx - w / 2f, cy - h / 2f);
+        p.lineTo(cx + w * 0.08f, cy - h / 2f);
+        p.lineTo(cx + w / 2f, cy);
+        p.lineTo(cx + w * 0.08f, cy + h / 2f);
+        p.lineTo(cx - w / 2f, cy + h / 2f);
+        p.lineTo(cx + w * 0.16f, cy);
+        p.close();
+        return p;
+    }
 
-        RectF book = new RectF(cx - dp(30), cy - dp(22), cx + dp(30), cy + dp(22));
-        pFill.setColor(C_SURFACE);
-        cv.drawRoundRect(book, dp(6), dp(6), pFill);
-        pLine.setColor(0xFFD9D5CC);
-        cv.drawRect(book.centerX() - dpf, book.top + dp(5),
-                book.centerX() + dpf, book.bottom - dp(5), pLine);
-        pLine.setColor(0xFFC9C4B9);
-        float ly = book.top + dp(9);
-        while (ly < book.bottom - dp(9)) {
-            cv.drawRect(book.left + dp(7), ly, book.left + dp(24), ly + dpf * 1.6f, pLine);
-            cv.drawRect(book.right - dp(24), ly, book.right - dp(7), ly + dpf * 1.6f, pLine);
-            ly += dp(7);
+    /** Dark art cover: italic serif title on near-black, thin inner frame. */
+    private void drawCoverDarkArt(Canvas cv, RectF r, Prefs.BookEntry e) {
+        pFill.setColor(0xFF3F3F3F);
+        cv.drawRect(r, pFill);
+        pStroke.setColor(0xFF6B6B6B);
+        pStroke.setStrokeWidth(dpf);
+        RectF inner = new RectF(r.left + dp(5), r.top + dp(5), r.right - dp(5), r.bottom - dp(17));
+        cv.drawRect(inner, pStroke);
+
+        float cy = r.top + r.height() * 0.36f;
+        pCoverSerifIt.setColor(0xFFDCDCDC);
+        drawWrappedCentered(cv, pCoverSerifIt, e.title, r.centerX(), cy,
+                r.width() - dp(18), r.height() * 0.5f);
+        if (e.author.length() > 0) {
+            pCoverSans.setColor(0xFFABABAB);
+            CharSequence a = TextUtils.ellipsize(e.author, pCoverSans,
+                    r.width() - dp(16), TextUtils.TruncateAt.END);
+            cv.drawText(a.toString(), r.centerX(), r.bottom - dp(24), pCoverSans);
         }
-
-        pEmptyTitle.setColor(C_TEXT);
-        cv.drawText("No books yet", cx, cy + rad + dp(40), pEmptyTitle);
-        pEmptyBody.setColor(C_TEXT2);
-        cv.drawText("Import a TXT or EPUB file to start reading.", cx, cy + rad + dp(64), pEmptyBody);
-
-        // tonal import button
-        float bw = dp(184);
-        float bh = dp(44);
-        emptyBtn.set(cx - bw / 2f, cy + rad + dp(84), cx + bw / 2f, cy + rad + dp(84) + bh);
-        pFill.setColor(pressedRow == -3 ? 0xFFD3E4DD : C_ACCENT_SOFT);
-        cv.drawRoundRect(emptyBtn, dp(22), dp(22), pFill);
-        pBtnText.setColor(C_ACCENT);
-        cv.drawText("Import book", emptyBtn.centerX(),
-                emptyBtn.centerY() - (pBtnText.ascent() + pBtnText.descent()) / 2f, pBtnText);
     }
 
-    private void drawDeleteDialog(Canvas cv) {
-        // scrim
-        pFill.setColor(C_SCRIM);
-        cv.drawRect(0, 0, W, H, pFill);
+    /** Classic light cover: double border, serif title + author, like old print. */
+    private void drawCoverClassic(Canvas cv, RectF r, Prefs.BookEntry e) {
+        pFill.setColor(0xFFF0F0EF);
+        cv.drawRect(r, pFill);
+        pStroke.setColor(0xFF2E2E2E);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRect(new RectF(r.left + dp(5), r.top + dp(5), r.right - dp(5), r.bottom - dp(17)), pStroke);
+        pStroke.setStrokeWidth(dpf * 0.7f);
+        cv.drawRect(new RectF(r.left + dp(8), r.top + dp(8), r.right - dp(8), r.bottom - dp(20)), pStroke);
 
-        float pw = Math.min(dp(320), W - dp(32));
-        float ph = dp(196);
-        RectF r = new RectF(W / 2f - pw / 2f, H / 2f - ph / 2f, W / 2f + pw / 2f, H / 2f + ph / 2f);
-        pCard.setColor(C_SURFACE);
-        cv.drawRoundRect(r, dp(18), dp(18), pCard);
-
-        pDlgTitle.setColor(C_TEXT);
-        cv.drawText("Delete book?", r.left + dp(24), r.top + dp(38), pDlgTitle);
-
-        CharSequence t = TextUtils.ellipsize(pendingDelete.title, pDlgBody, pw - dp(48),
-                TextUtils.TruncateAt.MIDDLE);
-        pDlgBody.setColor(C_TEXT2);
-        cv.drawText(t.toString(), r.left + dp(24), r.top + dp(66), pDlgBody);
-
-        List<String> wrapped = wrap("The file and your reading progress will be removed.",
-                pDlgBody, pw - dp(48));
-        float wy = r.top + dp(92);
-        for (String ln : wrapped) {
-            cv.drawText(ln, r.left + dp(24), wy, pDlgBody);
-            wy += dp(19);
+        float cy = r.top + r.height() * 0.30f;
+        pCoverSerif.setColor(0xFF1E1E1E);
+        drawWrappedCentered(cv, pCoverSerif, e.title, r.centerX(), cy,
+                r.width() - dp(24), r.height() * 0.44f);
+        // ornament line
+        pLine.setColor(0xFF8A8A8A);
+        float ly = cy + r.height() * 0.28f;
+        cv.drawRect(r.centerX() - dp(16), ly, r.centerX() + dp(16), ly + dpf, pLine);
+        if (e.author.length() > 0) {
+            pCoverSans.setColor(0xFF4A4A4A);
+            CharSequence a = TextUtils.ellipsize(e.author, pCoverSans,
+                    r.width() - dp(20), TextUtils.TruncateAt.END);
+            cv.drawText(a.toString(), r.centerX(), ly + dp(13), pCoverSans);
         }
-
-        // buttons, bottom-right
-        float bH = dp(40);
-        float by = r.bottom - dp(16) - bH;
-        float cancelW = pDlgBtn.measureText("CANCEL") + dp(28);
-        float deleteW = pDlgBtn.measureText("DELETE") + dp(28);
-        dlgDelete.set(r.right - dp(24) - deleteW, by, r.right - dp(24), by + bH);
-        dlgCancel.set(dlgDelete.left - dp(12) - cancelW, by, dlgDelete.left - dp(12), by + bH);
-
-        pDlgBtn.setColor(C_ACCENT);
-        cv.drawText("CANCEL", dlgCancel.centerX(),
-                dlgCancel.centerY() - (pDlgBtn.ascent() + pDlgBtn.descent()) / 2f, pDlgBtn);
-        pDlgBtn.setColor(C_DANGER);
-        cv.drawText("DELETE", dlgDelete.centerX(),
-                dlgDelete.centerY() - (pDlgBtn.ascent() + pDlgBtn.descent()) / 2f, pDlgBtn);
     }
 
-    private List<String> wrap(String text, TextPaint p, float maxW) {
-        List<String> out = new ArrayList<String>();
-        String[] words = text.split(" ");
+    /** Dark minimal cover: small sans title, lots of black. */
+    private void drawCoverDarkMin(Canvas cv, RectF r, Prefs.BookEntry e) {
+        pFill.setColor(0xFF2B2B2B);
+        cv.drawRect(r, pFill);
+        pFill.setColor(0xFF4A4A4A);
+        cv.drawRect(r.left + dp(8), r.top + dp(8), r.right - dp(8), r.top + dp(9), pFill);
+        float cy = r.top + r.height() * 0.30f;
+        pCoverSans.setColor(0xFFCFCFCF);
+        drawWrappedCentered(cv, pCoverSans, e.title, r.centerX(), cy,
+                r.width() - dp(20), r.height() * 0.5f);
+    }
+
+    private void drawWrappedCentered(Canvas cv, TextPaint p, String text,
+                                     float cx, float cy, float maxW, float maxH) {
+        if (text == null || text.length() == 0) return;
+        String[] words = text.split("\\s+");
+        ArrayList<String> lines = new ArrayList<String>();
         StringBuilder cur = new StringBuilder();
         for (String w : words) {
             String cand = cur.length() == 0 ? w : cur.toString() + " " + w;
+            if (p.measureText(cand) > maxW && cur.length() > 0) {
+                lines.add(cur.toString());
+                cur = new StringBuilder(w);
+            } else {
+                cur = new StringBuilder(cand);
+            }
+        }
+        if (cur.length() > 0) lines.add(cur.toString());
+        float lineH = -p.ascent() + p.descent() + dp(2);
+        int maxLines = (int) Math.max(1, Math.min(4, maxH / lineH));
+        float y = cy - (Math.min(lines.size(), maxLines) - 1) * lineH / 2f
+                - (p.ascent() + p.descent()) / 2f;
+        for (int i = 0; i < lines.size() && i < maxLines; i++) {
+            String ln = lines.get(i);
+            if (i == maxLines - 1 && lines.size() > maxLines) {
+                ln = TextUtils.ellipsize(ln, p, maxW, TextUtils.TruncateAt.END).toString();
+            }
+            cv.drawText(ln, cx, y, p);
+            y += lineH;
+        }
+    }
+
+    private void drawCoverText(Canvas cv, Prefs.BookEntry e, float x, float y) {
+        float w = coverW;
+        pTitle.setColor(INK);
+        String[] lines = wrapTwo(e.title, pTitle, w);
+        cv.drawText(lines[0], x, y + dp(12), pTitle);
+        if (lines[1] != null) cv.drawText(lines[1], x, y + dp(12) + dp(17), pTitle);
+        if (e.author.length() > 0) {
+            CharSequence a = TextUtils.ellipsize(e.author, pAuthor, w, TextUtils.TruncateAt.END);
+            pAuthor.setColor(INK2);
+            cv.drawText(a.toString(), x, y + dp(12) + dp(17) + dp(15), pAuthor);
+        }
+    }
+
+    private String[] wrapTwo(String text, TextPaint p, float maxW) {
+        String[] out = new String[]{"", null};
+        if (text == null || text.length() == 0) return out;
+        if (p.measureText(text) <= maxW) {
+            out[0] = text;
+            return out;
+        }
+        String[] words = text.split("\\s+");
+        StringBuilder l1 = new StringBuilder();
+        int i = 0;
+        for (; i < words.length; i++) {
+            String cand = l1.length() == 0 ? words[i] : l1 + " " + words[i];
+            if (p.measureText(cand) > maxW && l1.length() > 0) break;
+            l1.setLength(0);
+            l1.append(cand);
+        }
+        StringBuilder l2 = new StringBuilder();
+        for (; i < words.length; i++) {
+            String cand = l2.length() == 0 ? words[i] : l2 + " " + words[i];
+            if (p.measureText(cand) > maxW && l2.length() > 0) break;
+            l2.setLength(0);
+            l2.append(cand);
+        }
+        out[0] = TextUtils.ellipsize(l1.length() > 0 ? l1.toString() : text, p, maxW,
+                TextUtils.TruncateAt.END).toString();
+        out[1] = TextUtils.ellipsize(l2.toString(), p, maxW, TextUtils.TruncateAt.END).toString();
+        if (out[1].length() == 0) out[1] = null;
+        return out;
+    }
+
+    // ----------------------------------------------------------- footer icons
+
+    private void drawStar(Canvas cv, float cx, float cy, float r, boolean filled) {
+        Path p = new Path();
+        for (int k = 0; k < 10; k++) {
+            double ang = -Math.PI / 2 + k * Math.PI / 5;
+            float rr = (k % 2 == 0) ? r : r * 0.45f;
+            float px = cx + (float) Math.cos(ang) * rr;
+            float py = cy + (float) Math.sin(ang) * rr;
+            if (k == 0) p.moveTo(px, py);
+            else p.lineTo(px, py);
+        }
+        p.close();
+        if (filled) {
+            pFill.setColor(INK);
+            cv.drawPath(p, pFill);
+        } else {
+            pStroke.setColor(INK);
+            pStroke.setStrokeWidth(dpf);
+            cv.drawPath(p, pStroke);
+        }
+    }
+
+    private void drawCheckCircle(Canvas cv, float cx, float cy, float r) {
+        pStroke.setColor(INK);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawCircle(cx, cy, r, pStroke);
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.1f);
+        cv.drawLine(cx - r * 0.45f, cy, cx - r * 0.1f, cy + r * 0.38f, pIcon);
+        cv.drawLine(cx - r * 0.1f, cy + r * 0.38f, cx + r * 0.5f, cy - r * 0.38f, pIcon);
+    }
+
+    // ------------------------------------------------------------- bottom bar
+
+    private void drawBottomBar(Canvas cv) {
+        float y = H - bottomH;
+        pBottom.setColor(INK);
+        String total = "Total: Bookshelves(" + shelves.size() + ") / Books(" + books.size() + ")";
+        cv.drawText(total, contentL + dp(18), y + bottomH / 2f + spf * 4.5f, pBottom);
+
+        float xr = W - dp(18);
+        // next page chevron (rightmost)
+        float chevS = dp(9);
+        drawChevron(cv, xr - chevS, y + bottomH / 2f, chevS, true);
+        bottomHits.add(new float[]{xr - dp(26), y, xr, y + bottomH, 62});
+        xr -= dp(30);
+        // page text
+        String pt = (page + 1) + "/" + pageCount;
+        float tw = pBottom.measureText(pt);
+        pBottom.setColor(INK);
+        cv.drawText(pt, xr - tw, y + bottomH / 2f + spf * 4.5f, pBottom);
+        xr -= tw + dp(12);
+        // prev chevron
+        drawChevron(cv, xr - chevS, y + bottomH / 2f, chevS, false);
+        bottomHits.add(new float[]{xr - dp(26), y, xr, y + bottomH, 61});
+        xr -= dp(34);
+        // refresh
+        drawRefresh(cv, xr, y + bottomH / 2f, dp(11));
+        bottomHits.add(new float[]{xr - dp(14), y, xr + dp(14), y + bottomH, 63});
+    }
+
+    private void drawChevron(Canvas cv, float cx, float cy, float s, boolean right) {
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.8f);
+        float d = right ? s : -s;
+        cv.drawLine(cx - d * 0.5f, cy - s * 0.8f, cx + d * 0.5f, cy, pIcon);
+        cv.drawLine(cx + d * 0.5f, cy, cx - d * 0.5f, cy + s * 0.8f, pIcon);
+    }
+
+    private void drawRefresh(Canvas cv, float cx, float cy, float r) {
+        pIcon.setColor(INK);
+        pIcon.setStrokeWidth(dpf * 1.6f);
+        RectF oval = new RectF(cx - r, cy - r, cx + r, cy + r);
+        cv.drawArc(oval, 40f, 280f, false, pIcon);
+        // arrowhead
+        float ang = (float) Math.toRadians(40f);
+        float ax = cx + (float) Math.cos(ang) * r;
+        float ay = cy + (float) Math.sin(ang) * r;
+        pFill.setColor(INK);
+        Path a = new Path();
+        a.moveTo(ax + dpf * 2, ay - dpf * 4);
+        a.lineTo(ax - dpf * 5, ay - dpf * 2);
+        a.lineTo(ax + dpf * 2.5f, ay + dpf * 4);
+        a.close();
+        cv.drawPath(a, pFill);
+    }
+
+    // ------------------------------------------------------------- sections
+
+    private void drawSection(Canvas cv) {
+        int sec = section();
+        pHead.setColor(INK);
+        cv.drawText(SECTION_NAMES[sec], contentL + dp(18), statusH + dp(30), pHead);
+        pLine.setColor(HAIR);
+        cv.drawRect(contentL, statusH + dp(44), W, statusH + dp(44) + dpf, pLine);
+
+        float top = statusH + dp(58);
+        if (sec == SEC_STORAGE) drawStorageContent(cv, top);
+        else if (sec == SEC_SETTINGS) drawSettingsContent(cv, top);
+        else if (sec == SEC_APPS) drawAppsContent(cv, top);
+        else if (sec == SEC_STORE) drawSimpleEmpty(cv, top, "store",
+                "Store is not available on this device.",
+                "Books are managed locally on this build.");
+        else if (sec == SEC_NOTES) drawSimpleEmpty(cv, top, "notes",
+                "No notes yet",
+                "Highlights you make while reading will appear here.");
+    }
+
+    private void drawSimpleEmpty(Canvas cv, float top, String kind, String title, String sub) {
+        float cx = (contentL + W) / 2f;
+        float cy = top + (H - top - bottomH) / 2f - dp(30);
+        pIcon.setColor(0xFF9A9A9A);
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        float s = dp(44);
+        if (kind.equals("store")) iconStore(cv, cx, cy, s);
+        else iconNotes(cv, cx, cy, s);
+        pHead.setColor(INK);
+        pHead.setTextAlign(Paint.Align.CENTER);
+        cv.drawText(title, cx, cy + s / 2f + dp(32), pHead);
+        pHead.setTextAlign(Paint.Align.LEFT);
+        pBody2.setTextAlign(Paint.Align.CENTER);
+        cv.drawText(sub, cx, cy + s / 2f + dp(54), pBody2);
+        pBody2.setTextAlign(Paint.Align.LEFT);
+    }
+
+    private void drawStorageContent(Canvas cv, float top) {
+        float x = contentL + dp(18);
+        float w = W - x - dp(18);
+        float y = top + dp(10);
+
+        StatFs stat = new StatFs(getContext().getFilesDir().getPath());
+        long totalB = stat.getTotalBytes();
+        long freeB = stat.getAvailableBytes();
+        long usedB = totalB - freeB;
+        double gb = 1073741824.0;
+        int usedPct = totalB > 0 ? (int) (usedB * 100 / totalB) : 0;
+
+        pBody.setColor(INK);
+        cv.drawText("Internal storage", x, y, pBody);
+        y += dp(18);
+        pFill.setColor(0xFFC8C8C8);
+        cv.drawRect(x, y, x + w, y + dp(10), pFill);
+        pFill.setColor(INK);
+        cv.drawRect(x, y, x + w * usedPct / 100f, y + dp(10), pFill);
+        pStroke.setColor(COVER_BORDER);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRect(x, y, x + w, y + dp(10), pStroke);
+        y += dp(26);
+
+        pBody2.setColor(INK2);
+        cv.drawText(String.format(Locale.US, "Used %.1f GB of %.1f GB  (%d%%)",
+                usedB / gb, totalB / gb, usedPct), x, y, pBody2);
+        y += dp(22);
+        cv.drawText(String.format(Locale.US, "Free space: %.1f GB", freeB / gb), x, y, pBody2);
+        y += dp(30);
+
+        pBody.setColor(INK);
+        cv.drawText("Documents on this device", x, y, pBody);
+        y += dp(22);
+        int epub = 0, txt = 0, pdf = 0, other = 0;
+        for (Prefs.BookEntry e : books) {
+            String f = e.format.toLowerCase(Locale.US);
+            if (f.equals("epub")) epub++;
+            else if (f.equals("txt")) txt++;
+            else if (f.equals("pdf")) pdf++;
+            else other++;
+        }
+        pBody2.setColor(INK2);
+        cv.drawText("Books: " + books.size() + "    EPUB: " + epub + "    TXT: " + txt
+                + "    PDF: " + pdf + (other > 0 ? "    Other: " + other : ""), x, y, pBody2);
+        y += dp(22);
+        cv.drawText("Bookshelves: " + shelves.size(), x, y, pBody2);
+    }
+
+    private void drawSettingsContent(Canvas cv, float top) {
+        float x = contentL + dp(18);
+        float rowH = dp(44);
+        float w = W - x - dp(18);
+        float y = top + dp(8);
+
+        pBody.setColor(INK);
+        cv.drawText("Reading experience", x, y, pBody);
+        y += dp(16);
+
+        y = settingsRow(cv, x, y, w, rowH, "Page turn flash", settings.flash, 70);
+        y = settingsRow(cv, x, y, w, rowH, "Haptic feedback", settings.haptic, 71);
+
+        y += dp(16);
+        pBody.setColor(INK);
+        cv.drawText("Reading theme", x, y, pBody);
+        y += dp(16);
+        String[] themes = {"Classic gray", "White paper", "Night"};
+        for (int i = 0; i < themes.length; i++) {
+            boolean on = settings.theme == i;
+            // radio
+            pStroke.setColor(INK);
+            pStroke.setStrokeWidth(dpf * 1.3f);
+            float ry = y + rowH / 2f;
+            cv.drawCircle(x + dp(10), ry, dp(6), pStroke);
+            if (on) {
+                pFill.setColor(INK);
+                cv.drawCircle(x + dp(10), ry, dp(3), pFill);
+            }
+            pBody.setColor(INK);
+            cv.drawText(themes[i], x + dp(28), ry + spf * 5, pBody);
+            pLine.setColor(PANEL_HAIR);
+            cv.drawRect(x, y + rowH - dpf, x + w, y + rowH, pLine);
+            bottomHits.add(new float[]{x, y, x + w, y + rowH, 72 + i});
+            y += rowH;
+        }
+
+        y += dp(18);
+        pBody.setColor(INK);
+        cv.drawText("About", x, y, pBody);
+        y += dp(22);
+        pBody2.setColor(INK2);
+        cv.drawText("InkBook 1.0.0 - e-ink reader for Android", x, y, pBody2);
+    }
+
+    private float settingsRow(Canvas cv, float x, float y, float w, float rowH,
+                              String label, boolean on, int action) {
+        float ry = y + rowH / 2f;
+        pStroke.setColor(INK);
+        pStroke.setStrokeWidth(dpf * 1.4f);
+        cv.drawRect(new RectF(x, ry - dp(7), x + dp(14), ry + dp(7)), pStroke);
+        if (on) {
+            pFill.setColor(INK);
+            cv.drawRect(new RectF(x + dp(3), ry - dp(4), x + dp(11), ry + dp(4)), pFill);
+        }
+        pBody.setColor(INK);
+        cv.drawText(label, x + dp(28), ry + spf * 5, pBody);
+        pLine.setColor(PANEL_HAIR);
+        cv.drawRect(x, y + rowH - dpf, x + w, y + rowH, pLine);
+        bottomHits.add(new float[]{x, y, x + w, y + rowH, action});
+        return y + rowH;
+    }
+
+    private void drawAppsContent(Canvas cv, float top) {
+        float x = contentL + dp(18);
+        float y = top + dp(12);
+        float tw = dp(120);
+        float th = dp(108);
+        float gap = dp(16);
+        String[] names = {"Reader", "Import book", "Refresh screen"};
+        int[] actions = {80, 81, 82};
+        for (int i = 0; i < names.length; i++) {
+            float tx = x + i * (tw + gap);
+            if (tx + tw > W) break;
+            pFill.setColor(PANEL);
+            cv.drawRect(new RectF(tx, y, tx + tw, y + th), pFill);
+            pStroke.setColor(COVER_BORDER);
+            pStroke.setStrokeWidth(dpf);
+            cv.drawRect(new RectF(tx, y, tx + tw, y + th), pStroke);
+            float cx = tx + tw / 2f;
+            float icy = y + th * 0.38f;
+            pIcon.setColor(INK);
+            if (i == 0) iconBook(cv, cx, icy, dp(26));
+            else if (i == 1) iconStorage(cv, cx, icy, dp(26));
+            else drawRefresh(cv, cx, icy, dp(13));
+            pLabel.setColor(INK);
+            pLabel.setTextSize(spf * 11.5f);
+            cv.drawText(names[i], cx, y + th - dp(18), pLabel);
+            pLabel.setTextSize(spf * 10f);
+            bottomHits.add(new float[]{tx, y, tx + tw, y + th, actions[i]});
+        }
+    }
+
+    // ---------------------------------------------------------- panel base
+
+    private RectF drawPanel(Canvas cv, float pw, float ph) {
+        pw = Math.min(pw, W - dp(24));
+        ph = Math.min(ph, H - dp(40));
+        pFill.setColor(SCRIM);
+        cv.drawRect(0, 0, W, H, pFill);
+        RectF r = new RectF((W - pw) / 2f, (H - ph) / 2f, (W + pw) / 2f, (H + ph) / 2f);
+        pFill.setColor(PANEL);
+        cv.drawRoundRect(r, dp(2), dp(2), pFill);
+        pStroke.setColor(INK);
+        pStroke.setStrokeWidth(dpf);
+        cv.drawRoundRect(r, dp(2), dp(2), pStroke);
+        return r;
+    }
+
+    private void panelTitle(Canvas cv, RectF r, String title) {
+        pMenuTitle.setColor(INK);
+        cv.drawText(title, r.left + dp(16), r.top + dp(26), pMenuTitle);
+        pLine.setColor(PANEL_HAIR);
+        cv.drawRect(r.left, r.top + dp(38), r.right, r.top + dp(38) + dpf, pLine);
+    }
+
+    private void panelRow(Canvas cv, RectF r, float y, float rowH, String label,
+                          int action, boolean selected, boolean radio, ArrayList<float[]> hits) {
+        if (selected) {
+            pFill.setColor(0xFFE4E4E3);
+            cv.drawRect(r.left + dpf, y, r.right - dpf, y + rowH, pFill);
+        }
+        if (radio) {
+            pStroke.setColor(INK);
+            pStroke.setStrokeWidth(dpf * 1.3f);
+            float cy = y + rowH / 2f;
+            cv.drawCircle(r.left + dp(22), cy, dp(6), pStroke);
+            if (selected) {
+                pFill.setColor(INK);
+                cv.drawCircle(r.left + dp(22), cy, dp(3), pFill);
+            }
+        }
+        pMenu.setColor(INK);
+        cv.drawText(label, r.left + dp(radio ? 40 : 16), y + rowH / 2f + spf * 5, pMenu);
+        pLine.setColor(PANEL_HAIR);
+        cv.drawRect(r.left + dpf, y + rowH - dpf, r.right - dpf, y + rowH, pLine);
+        if (hits != null) hits.add(new float[]{r.left, y, r.right, y + rowH, action});
+    }
+
+    // ------------------------------------------------------------- overlays
+
+    abstract class Overlay {
+        boolean visible = false;
+        final ArrayList<float[]> hits = new ArrayList<float[]>();
+
+        void clearHits() { hits.clear(); }
+
+        void hit(float x0, float y0, float x1, float y1, int action) {
+            hits.add(new float[]{x0, y0, x1, y1, action});
+        }
+
+        int hitAt(float x, float y) {
+            for (float[] h : hits) {
+                if (x >= h[0] && x <= h[2] && y >= h[1] && y <= h[3]) return (int) h[4];
+            }
+            return -1;
+        }
+
+        abstract void draw(Canvas cv);
+
+        abstract boolean onTouch(float x, float y);
+
+        void onDown(float x, float y) { }
+        void onMove(float x, float y) { }
+        void onCancel() { }
+    }
+
+    private void show(Overlay o) {
+        active = o;
+        o.visible = true;
+        invalidate();
+    }
+
+    void hide() {
+        if (active != null) active.visible = false;
+        active = null;
+        invalidate();
+    }
+
+    class SortOverlay extends Overlay {
+        void draw(Canvas cv) {
+            clearHits();
+            String[] opts = {"Title", "Author", "Date added", "Recently opened"};
+            float rowH = dp(42);
+            RectF r = drawPanel(cv, dp(224), dp(38) + opts.length * rowH + dp(8));
+            panelTitle(cv, r, "Sort by");
+            float y = r.top + dp(46);
+            for (int i = 0; i < opts.length; i++) {
+                panelRow(cv, r, y, rowH, opts[i], i, sortMode == i, true, hits);
+                y += rowH;
+            }
+        }
+
+        boolean onTouch(float x, float y) {
+            int a = hitAt(x, y);
+            if (a < 0) {
+                hide();
+                return true;
+            }
+            if (a < 4) {
+                sortMode = a;
+                page = 0;
+                rebuild();
+                hide();
+                invalidate();
+            }
+            return true;
+        }
+    }
+
+    class ShelfOverlay extends Overlay {
+        void draw(Canvas cv) {
+            clearHits();
+            float rowH = dp(42);
+            int n = 1 + shelves.size() + 1;
+            RectF r = drawPanel(cv, dp(252), dp(38) + n * rowH + dp(8));
+            panelTitle(cv, r, "Bookshelves");
+            float y = r.top + dp(46);
+            panelRow(cv, r, y, rowH, "All books (" + books.size() + ")",
+                    0, shelfFilter == null, true, hits);
+            y += rowH;
+            for (int i = 0; i < shelves.size(); i++) {
+                int count = 0;
+                for (Prefs.BookEntry e : books) {
+                    if (shelves.get(i).equals(e.shelf)) count++;
+                }
+                panelRow(cv, r, y, rowH, shelves.get(i) + " (" + count + ")",
+                        100 + i, shelfFilter != null && shelfFilter.equals(shelves.get(i)),
+                        true, hits);
+                y += rowH;
+            }
+            panelRow(cv, r, y, rowH, "+ New bookshelf", 9, false, false, hits);
+        }
+
+        boolean onTouch(float x, float y) {
+            int a = hitAt(x, y);
+            if (a < 0) {
+                hide();
+                return true;
+            }
+            if (a == 0) {
+                shelfFilter = null;
+                page = 0;
+                rebuild();
+                hide();
+                invalidate();
+            } else if (a == 9) {
+                pendingShelfFor = null;
+                showNewShelfInput();
+            } else if (a >= 100) {
+                shelfFilter = shelves.get(a - 100);
+                page = 0;
+                rebuild();
+                hide();
+                invalidate();
+            }
+            return true;
+        }
+    }
+
+    class BookActionsOverlay extends Overlay {
+        void draw(Canvas cv) {
+            clearHits();
+            String[] opts;
+            if (actionTarget.favorite) {
+                opts = new String[]{"Open", "Add to bookshelf", "Remove favorite", "Delete"};
+            } else {
+                opts = new String[]{"Open", "Add to bookshelf", "Mark favorite", "Delete"};
+            }
+            float rowH = dp(42);
+            RectF r = drawPanel(cv, dp(244), dp(38) + opts.length * rowH + dp(8));
+            panelTitle(cv, r, actionTarget.title);
+            float y = r.top + dp(46);
+            for (int i = 0; i < opts.length; i++) {
+                panelRow(cv, r, y, rowH, opts[i], i, false, false, hits);
+                y += rowH;
+            }
+        }
+
+        boolean onTouch(float x, float y) {
+            int a = hitAt(x, y);
+            if (a < 0) {
+                hide();
+                return true;
+            }
+            final Prefs.BookEntry e = actionTarget;
+            if (a == 0) {
+                hide();
+                host.onOpenBook(e);
+            } else if (a == 1) {
+                show(new AddToShelfOverlay());
+                invalidate();
+            } else if (a == 2) {
+                e.favorite = !e.favorite;
+                saveBooks();
+                rebuild();
+                hide();
+                invalidate();
+            } else if (a == 3) {
+                showConfirm("Delete book",
+                        "Remove \"" + e.title + "\" and its reading progress?",
+                        "DELETE", 0);
+            }
+            return true;
+        }
+    }
+
+    class AddToShelfOverlay extends Overlay {
+        void draw(Canvas cv) {
+            clearHits();
+            float rowH = dp(42);
+            int extra = (actionTarget.shelf.length() > 0) ? 1 : 0;
+            int n = extra + shelves.size() + 1;
+            RectF r = drawPanel(cv, dp(252), dp(38) + n * rowH + dp(8));
+            panelTitle(cv, r, "Add to bookshelf");
+            float y = r.top + dp(46);
+            if (extra == 1) {
+                panelRow(cv, r, y, rowH, "Remove from shelf", 8,
+                        actionTarget.shelf.length() == 0, false, hits);
+                y += rowH;
+            }
+            for (int i = 0; i < shelves.size(); i++) {
+                panelRow(cv, r, y, rowH, shelves.get(i),
+                        100 + i, actionTarget.shelf.equals(shelves.get(i)), true, hits);
+                y += rowH;
+            }
+            panelRow(cv, r, y, rowH, "+ New bookshelf", 9, false, false, hits);
+        }
+
+        boolean onTouch(float x, float y) {
+            int a = hitAt(x, y);
+            if (a < 0) {
+                hide();
+                return true;
+            }
+            final Prefs.BookEntry e = actionTarget;
+            if (a == 8) {
+                e.shelf = "";
+                saveBooks();
+                rebuild();
+                hide();
+                invalidate();
+            } else if (a == 9) {
+                pendingShelfFor = e.id;
+                showNewShelfInput();
+            } else if (a >= 100) {
+                e.shelf = shelves.get(a - 100);
+                saveBooks();
+                rebuild();
+                hide();
+                invalidate();
+            }
+            return true;
+        }
+    }
+
+    class ConfirmOverlay extends Overlay {
+        String title;
+        String message;
+        String confirmLabel;
+        int code; // 0 delete book, 1 delete shelf
+
+        ConfirmOverlay(String t, String m, String label, int c) {
+            title = t;
+            message = m;
+            confirmLabel = label;
+            code = c;
+        }
+
+        void draw(Canvas cv) {
+            clearHits();
+            float rowH = dp(46);
+            RectF r = drawPanel(cv, dp(280), dp(38) + rowH * 2 + dp(20));
+            panelTitle(cv, r, title);
+            pBody2.setColor(INK);
+            float y = r.top + dp(52);
+            List<String> wrapped = wrapText(message, pBody2, r.width() - dp(32));
+            for (String ln : wrapped) {
+                cv.drawText(ln, r.left + dp(16), y, pBody2);
+                y += dp(18);
+            }
+            float by = r.bottom - rowH;
+            // two text buttons, right aligned
+            float cw = pMenu.measureText("Cancel") + dp(24);
+            float dw = pMenu.measureText(confirmLabel) + dp(24);
+            float dx1 = r.right - dp(16);
+            float dx0 = dx1 - dw;
+            float cx1 = dx0 - dp(12);
+            float cx0 = cx1 - cw;
+            pMenu.setColor(INK);
+            pMenu.setTextAlign(Paint.Align.CENTER);
+            cv.drawText("Cancel", (cx0 + cx1) / 2f, by + rowH / 2f + spf * 5, pMenu);
+            cv.drawText(confirmLabel, (dx0 + dx1) / 2f, by + rowH / 2f + spf * 5, pMenu);
+            pMenu.setTextAlign(Paint.Align.LEFT);
+            pLine.setColor(PANEL_HAIR);
+            cv.drawRect(r.left + dpf, by, r.right - dpf, by + dpf, pLine);
+            hit(cx0, by, cx1, by + rowH, 0);
+            hit(dx0, by, dx1, by + rowH, 1);
+        }
+
+        boolean onTouch(float x, float y) {
+            int a = hitAt(x, y);
+            if (a < 0) {
+                hide();
+                return true;
+            }
+            if (a == 1) {
+                if (code == 0 && actionTarget != null) {
+                    Prefs.BookEntry t = actionTarget;
+                    hide();
+                    host.onDeleteBook(t);
+                    refresh();
+                    return true;
+                }
+            }
+            hide();
+            invalidate();
+            return true;
+        }
+    }
+
+    class InfoOverlay extends Overlay {
+        String title;
+        String message;
+
+        InfoOverlay(String t, String m) {
+            title = t;
+            message = m;
+        }
+
+        void draw(Canvas cv) {
+            clearHits();
+            float rowH = dp(46);
+            RectF r = drawPanel(cv, dp(280), dp(38) + rowH * 2 + dp(20));
+            panelTitle(cv, r, title);
+            float y = r.top + dp(52);
+            List<String> wrapped = wrapText(message, pBody2, r.width() - dp(32));
+            for (String ln : wrapped) {
+                cv.drawText(ln, r.left + dp(16), y, pBody2);
+                y += dp(18);
+            }
+            float by = r.bottom - rowH;
+            float dw = pMenu.measureText("OK") + dp(28);
+            float dx0 = r.right - dp(16) - dw;
+            float dx1 = r.right - dp(16);
+            pMenu.setColor(INK);
+            pMenu.setTextAlign(Paint.Align.CENTER);
+            cv.drawText("OK", (dx0 + dx1) / 2f, by + rowH / 2f + spf * 5, pMenu);
+            pMenu.setTextAlign(Paint.Align.LEFT);
+            pLine.setColor(PANEL_HAIR);
+            cv.drawRect(r.left + dpf, by, r.right - dpf, by + dpf, pLine);
+            hit(dx0, by, dx1, by + rowH, 0);
+        }
+
+        boolean onTouch(float x, float y) {
+            hide();
+            invalidate();
+            return true;
+        }
+    }
+
+    private void showConfirm(String title, String msg, String label, int code) {
+        show(new ConfirmOverlay(title, msg, label, code));
+    }
+
+    private List<String> wrapText(String text, TextPaint p, float maxW) {
+        List<String> out = new ArrayList<String>();
+        if (text == null || text.length() == 0) return out;
+        String[] words = text.split(" ");
+        StringBuilder cur = new StringBuilder();
+        for (String w : words) {
+            String cand = cur.length() == 0 ? w : cur + " " + w;
             if (p.measureText(cand) > maxW && cur.length() > 0) {
                 out.add(cur.toString());
                 cur = new StringBuilder(w);
@@ -428,7 +1426,310 @@ public final class LibraryView extends View {
         return out;
     }
 
+    // -------------------------------------------------------------- dialogs
+
+    interface TextReady {
+        void onText(String s);
+    }
+
+    private void showNewShelfInput() {
+        showTextInput("New bookshelf", "Shelf name", new TextReady() {
+            public void onText(String s) {
+                if (s.length() == 0) return;
+                if (!shelves.contains(s)) {
+                    shelves.add(s);
+                    prefs.saveShelves(shelves);
+                }
+                if (pendingShelfFor != null) {
+                    for (Prefs.BookEntry e : books) {
+                        if (pendingShelfFor.equals(e.id)) {
+                            e.shelf = s;
+                            break;
+                        }
+                    }
+                    pendingShelfFor = null;
+                    saveBooks();
+                    rebuild();
+                    invalidate();
+                } else {
+                    shelfFilter = s;
+                    page = 0;
+                    rebuild();
+                    invalidate();
+                }
+            }
+        });
+    }
+
+    private void showTextInput(String title, String hint, final TextReady ready) {
+        try {
+            Context ctx = getContext();
+            final EditText input = new EditText(ctx);
+            input.setSingleLine(true);
+            input.setHint(hint);
+            input.setTextSize(15);
+            AlertDialog dlg = new AlertDialog.Builder(ctx,
+                    android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                    .setTitle(title)
+                    .setView(input)
+                    .setPositiveButton("OK", new android.content.DialogInterface.OnClickListener() {
+                        public void onClick(android.content.DialogInterface d, int w) {
+                            ready.onText(input.getText().toString().trim());
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .create();
+            dlg.getWindow().setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+            dlg.show();
+        } catch (Exception ignored) { }
+    }
+
+    private void showSearchDialog() {
+        try {
+            Context ctx = getContext();
+            final EditText input = new EditText(ctx);
+            input.setSingleLine(true);
+            input.setHint("Search title or author");
+            input.setTextSize(15);
+            if (query.length() > 0) input.setText(query);
+            AlertDialog dlg = new AlertDialog.Builder(ctx,
+                    android.R.style.Theme_DeviceDefault_Light_Dialog_Alert)
+                    .setTitle("Search books")
+                    .setView(input)
+                    .setPositiveButton("Apply", new android.content.DialogInterface.OnClickListener() {
+                        public void onClick(android.content.DialogInterface d, int w) {
+                            setQuery(input.getText().toString().trim());
+                        }
+                    })
+                    .setNeutralButton("Clear", new android.content.DialogInterface.OnClickListener() {
+                        public void onClick(android.content.DialogInterface d, int w) {
+                            setQuery("");
+                        }
+                    })
+                    .setNegativeButton("Close", null)
+                    .create();
+            dlg.getWindow().setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+            // instant filtering while typing
+            input.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int a, int b, int c2) { }
+                public void onTextChanged(CharSequence s, int a, int b, int c2) { }
+
+                public void afterTextChanged(android.text.Editable s) {
+                    String q = s.toString().trim();
+                    if (!q.equals(query)) {
+                        query = q;
+                        page = 0;
+                        computeGeometry();
+                        rebuild();
+                        invalidate();
+                    }
+                }
+            });
+            dlg.show();
+        } catch (Exception ignored) { }
+    }
+
+    // ------------------------------------------------------------ sidebar icons
+
+    private void iconBook(Canvas cv, float cx, float cy, float s) {
+        float w = s * 0.74f;
+        float h = s;
+        float x0 = cx - w / 2f;
+        float y0 = cy - h / 2f;
+        cv.drawRect(new RectF(x0, y0, x0 + w, y0 + h), pIcon);
+        pLine.setStyle(Paint.Style.FILL);
+        pFill.setColor(pIcon.getColor());
+        cv.drawRect(new RectF(x0 + w * 0.28f, y0 + h * 0.18f, x0 + w * 0.74f, y0 + h * 0.26f), pFill);
+        cv.drawRect(new RectF(x0 + w * 0.28f, y0 + h * 0.38f, x0 + w * 0.74f, y0 + h * 0.46f), pFill);
+        cv.drawRect(new RectF(x0 + w * 0.28f, y0 + h * 0.58f, x0 + w * 0.60f, y0 + h * 0.66f), pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    private void iconStore(Canvas cv, float cx, float cy, float s) {
+        float w = s * 0.86f;
+        float x0 = cx - w / 2f;
+        float y0 = cy - s * 0.42f;
+        // awning zigzag
+        Path aw = new Path();
+        aw.moveTo(x0, y0 + s * 0.18f);
+        aw.lineTo(x0 + w, y0 + s * 0.18f);
+        aw.lineTo(x0 + w, y0 + s * 0.30f);
+        aw.lineTo(x0 + w * 0.75f, y0 + s * 0.44f);
+        aw.lineTo(x0 + w * 0.5f, y0 + s * 0.30f);
+        aw.lineTo(x0 + w * 0.25f, y0 + s * 0.44f);
+        aw.lineTo(x0, y0 + s * 0.30f);
+        aw.close();
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        cv.drawPath(aw, pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+        // roof line
+        cv.drawLine(x0, y0 + s * 0.18f, x0 + w * 0.12f, y0 - s * 0.06f, pIcon);
+        cv.drawLine(x0 + w * 0.12f, y0 - s * 0.06f, x0 + w * 0.88f, y0 - s * 0.06f, pIcon);
+        cv.drawLine(x0 + w * 0.88f, y0 - s * 0.06f, x0 + w, y0 + s * 0.18f, pIcon);
+        // base
+        cv.drawRect(new RectF(x0 + w * 0.10f, y0 + s * 0.52f, x0 + w * 0.90f, y0 + s * 1.0f), pIcon);
+        cv.drawLine(x0 + w * 0.32f, y0 + s * 0.66f, x0 + w * 0.32f, y0 + s * 1.0f, pIcon);
+        cv.drawLine(x0 + w * 0.32f, y0 + s * 0.66f, x0 + w * 0.72f, y0 + s * 0.66f, pIcon);
+    }
+
+    private void iconNotes(Canvas cv, float cx, float cy, float s) {
+        float w = s * 0.72f;
+        float h = s * 0.92f;
+        float x0 = cx - w / 2f;
+        float y0 = cy - h / 2f;
+        cv.drawRect(new RectF(x0, y0, x0 + w, y0 + h), pIcon);
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        cv.drawRect(new RectF(x0 + w * 0.18f, y0 + h * 0.18f, x0 + w * 0.82f, y0 + h * 0.25f), pFill);
+        cv.drawRect(new RectF(x0 + w * 0.18f, y0 + h * 0.38f, x0 + w * 0.82f, y0 + h * 0.45f), pFill);
+        cv.drawRect(new RectF(x0 + w * 0.18f, y0 + h * 0.58f, x0 + w * 0.60f, y0 + h * 0.65f), pFill);
+        // clip on top
+        cv.drawRect(new RectF(cx - w * 0.14f, y0 - s * 0.08f, cx + w * 0.14f, y0 + s * 0.02f), pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    private void iconStorage(Canvas cv, float cx, float cy, float s) {
+        float w = s * 0.82f;
+        float x0 = cx - w / 2f;
+        float y0 = cy - s * 0.44f;
+        // lid
+        cv.drawRect(new RectF(x0 - dp(2), y0, x0 + w + dp(2), y0 + s * 0.16f), pIcon);
+        // body
+        cv.drawRect(new RectF(x0, y0 + s * 0.16f, x0 + w, y0 + s * 1.0f), pIcon);
+        // slot
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        cv.drawRect(new RectF(x0 + w * 0.32f, y0 + s * 0.34f, x0 + w * 0.68f, y0 + s * 0.42f), pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    private void iconApps(Canvas cv, float cx, float cy, float s) {
+        float r = s * 0.52f;
+        Path hex = new Path();
+        for (int k = 0; k < 6; k++) {
+            double ang = Math.PI / 6 + k * Math.PI / 3;
+            float px = cx + (float) Math.cos(ang) * r;
+            float py = cy + (float) Math.sin(ang) * r;
+            if (k == 0) hex.moveTo(px, py);
+            else hex.lineTo(px, py);
+        }
+        hex.close();
+        cv.drawPath(hex, pIcon);
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        cv.drawCircle(cx, cy, dpf * 1.6f, pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    private void iconGear(Canvas cv, float cx, float cy, float s) {
+        float r = s * 0.34f;
+        cv.drawCircle(cx, cy, r, pIcon);
+        pIcon.setStrokeWidth(dpf * 1.8f);
+        for (int k = 0; k < 8; k++) {
+            double ang = k * Math.PI / 4;
+            float x1 = cx + (float) Math.cos(ang) * r;
+            float y1 = cy + (float) Math.sin(ang) * r;
+            float x2 = cx + (float) Math.cos(ang) * (r + s * 0.14f);
+            float y2 = cy + (float) Math.sin(ang) * (r + s * 0.14f);
+            cv.drawLine(x1, y1, x2, y2, pIcon);
+        }
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        cv.drawCircle(cx, cy, dpf * 1.5f, pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    // ---------------------------------------------------------- toolbar icons
+
+    private void iconClock(Canvas cv, float cx, float cy, float s) {
+        float r = s * 0.5f;
+        cv.drawCircle(cx, cy, r, pIcon);
+        pIcon.setStrokeWidth(dpf * 1.4f);
+        cv.drawLine(cx, cy, cx, cy - r * 0.62f, pIcon);
+        cv.drawLine(cx, cy, cx + r * 0.5f, cy + r * 0.18f, pIcon);
+    }
+
+    private void iconColumns(Canvas cv, float cx, float cy, float s) {
+        float h = s * 0.9f;
+        pIcon.setStrokeWidth(dpf * 2.2f);
+        cv.drawLine(cx - s * 0.34f, cy - h / 2f, cx - s * 0.34f, cy + h / 2f, pIcon);
+        cv.drawLine(cx, cy - h / 2f, cx, cy + h * 0.10f, pIcon);
+        cv.drawLine(cx + s * 0.34f, cy - h / 2f, cx + s * 0.34f, cy + h / 2f, pIcon);
+    }
+
+    private void iconCloud(Canvas cv, float cx, float cy, float s) {
+        pIcon.setStrokeWidth(dpf * 1.5f);
+        RectF base = new RectF(cx - s * 0.48f, cy, cx + s * 0.48f, cy + s * 0.30f);
+        cv.drawRoundRect(base, s * 0.15f, s * 0.15f, pIcon);
+        cv.drawArc(new RectF(cx - s * 0.48f, cy - s * 0.22f, cx - s * 0.02f, cy + s * 0.24f),
+                95f, 175f, false, pIcon);
+        cv.drawArc(new RectF(cx - s * 0.18f, cy - s * 0.52f, cx + s * 0.40f, cy + s * 0.10f),
+                140f, 200f, false, pIcon);
+    }
+
+    private void iconSearch(Canvas cv, float cx, float cy, float s) {
+        float r = s * 0.36f;
+        cv.drawCircle(cx - r * 0.25f, cy - r * 0.25f, r, pIcon);
+        cv.drawLine(cx + r * 0.35f, cy + r * 0.35f, cx + s * 0.52f, cy + s * 0.52f, pIcon);
+    }
+
+    private void iconSort(Canvas cv, float cx, float cy, float s) {
+        pIcon.setStrokeWidth(dpf * 1.8f);
+        cv.drawLine(cx - s * 0.42f, cy - s * 0.30f, cx + s * 0.30f, cy - s * 0.30f, pIcon);
+        cv.drawLine(cx - s * 0.42f, cy, cx + s * 0.10f, cy, pIcon);
+        cv.drawLine(cx - s * 0.42f, cy + s * 0.30f, cx + s * 0.30f, cy + s * 0.30f, pIcon);
+        pFill.setColor(pIcon.getColor());
+        pLine.setStyle(Paint.Style.FILL);
+        Path a = new Path();
+        a.moveTo(cx + s * 0.30f, cy + s * 0.08f);
+        a.lineTo(cx + s * 0.48f, cy + s * 0.30f);
+        a.lineTo(cx + s * 0.30f, cy + s * 0.30f);
+        a.close();
+        cv.drawPath(a, pFill);
+        pLine.setStyle(Paint.Style.STROKE);
+    }
+
+    private void iconView(Canvas cv, float cx, float cy, float s) {
+        float r = s * 0.48f;
+        cv.drawCircle(cx, cy, r, pIcon);
+        pIcon.setStrokeWidth(dpf * 1.6f);
+        cv.drawLine(cx - r * 0.55f, cy - r * 0.38f, cx + r * 0.55f, cy - r * 0.38f, pIcon);
+        cv.drawLine(cx - r * 0.55f, cy, cx + r * 0.55f, cy, pIcon);
+        cv.drawLine(cx - r * 0.55f, cy + r * 0.38f, cx + r * 0.55f, cy + r * 0.38f, pIcon);
+    }
+
     // ---------------------------------------------------------------- touch
+
+    private final Runnable longPressTask = new Runnable() {
+        public void run() {
+            if (longFired || active != null) return;
+            if (section() != SEC_LIBRARY) return;
+            int idx = hitAction(coverHits, downX, downY);
+            if (idx >= 0 && idx < filtered.size()) {
+                longFired = true;
+                actionTarget = filtered.get(idx);
+                performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                show(new BookActionsOverlay());
+            }
+        }
+    };
+
+    private int hitIndex(ArrayList<float[]> hits, float x, float y) {
+        for (int i = 0; i < hits.size(); i++) {
+            float[] h = hits.get(i);
+            if (x >= h[0] && x <= h[2] && y >= h[1] && y <= h[3]) return i;
+        }
+        return -1;
+    }
+
+    private int hitAction(ArrayList<float[]> hits, float x, float y) {
+        int i = hitIndex(hits, x, y);
+        return i >= 0 ? (int) hits.get(i)[4] : -1;
+    }
 
     @Override
     public boolean onTouchEvent(MotionEvent e) {
@@ -436,101 +1737,160 @@ public final class LibraryView extends View {
         float y = e.getY();
         int action = e.getActionMasked();
 
+        if (active != null) {
+            switch (action) {
+                case MotionEvent.ACTION_DOWN:
+                    active.onDown(x, y);
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    active.onMove(x, y);
+                    break;
+                case MotionEvent.ACTION_CANCEL:
+                    active.onCancel();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    return active.onTouch(x, y);
+                default:
+                    break;
+            }
+            return true;
+        }
+
         switch (action) {
             case MotionEvent.ACTION_DOWN:
                 downX = x;
                 downY = y;
-                lastMoveY = y;
                 moved = false;
-                if (pendingDelete != null) {
-                    handleDeleteTouch(x, y);
-                    return true;
-                }
-                pressedRow = rowAt(x, y);
-                if (pressedRow < 0 && importBtn.contains(x, y)) {
-                    pressedRow = -2; // FAB pressed
-                } else if (books.isEmpty() && emptyBtn.contains(x, y)) {
-                    pressedRow = -3; // empty-state button pressed
-                }
-                invalidate();
+                longFired = false;
                 postDelayed(longPressTask, 550);
                 return true;
             case MotionEvent.ACTION_MOVE:
-                if (pendingDelete != null) return true;
                 if (!moved && (Math.abs(x - downX) > touchSlop || Math.abs(y - downY) > touchSlop)) {
                     moved = true;
                     removeCallbacks(longPressTask);
-                    pressedRow = -1;
-                    invalidate();
-                }
-                if (moved) {
-                    float dy = y - lastMoveY;
-                    scroll -= dy;
-                    lastMoveY = y;
-                    invalidate();
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
                 removeCallbacks(longPressTask);
-                pressedRow = -1;
-                invalidate();
                 return true;
             case MotionEvent.ACTION_UP:
                 removeCallbacks(longPressTask);
-                if (pendingDelete != null) {
-                    handleDeleteTouch(x, y);
-                    return true;
-                }
-                if (moved) {
-                    pressedRow = -1;
-                    invalidate();
-                    return true;
-                }
-                if (pressedRow == -2 || importBtn.contains(x, y)) {
-                    pressedRow = -1;
-                    invalidate();
-                    host.onImport();
-                    return true;
-                }
-                if (pressedRow == -3 || (books.isEmpty() && emptyBtn.contains(x, y))) {
-                    pressedRow = -1;
-                    invalidate();
-                    host.onImport();
-                    return true;
-                }
-                int row = rowAt(x, y);
-                pressedRow = -1;
-                if (row >= 0 && row < books.size()) {
-                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-                    host.onOpenBook(books.get(row));
-                } else {
-                    invalidate();
-                }
+                if (longFired) return true;
+                if (!moved) handleTap(x, y);
                 return true;
             default:
                 return true;
         }
     }
 
-    private void handleDeleteTouch(float x, float y) {
-        if (dlgCancel.contains(x, y)) {
-            pendingDelete = null;
+    private void handleTap(float x, float y) {
+        int sec = hitAction(sideHits, x, y);
+        if (sec >= 0) {
+            if (sec != section()) {
+                currentSection = sec;
+                if (sec == SEC_STORAGE) refresh();
+                else invalidate();
+            }
+            return;
+        }
+
+        if (section() != SEC_LIBRARY) {
+            // section content taps (settings rows / app tiles)
+            int sa = hitAction(bottomHits, x, y);
+            handleSectionAction(sa);
+            return;
+        }
+
+        int tool = hitAction(toolHits, x, y);
+        if (tool >= 0) {
+            handleToolTap(tool);
+            return;
+        }
+
+        int bot = hitAction(bottomHits, x, y);
+        if (bot == 60) { // clear search chip
+            setQuery("");
+            computeGeometry();
+            return;
+        } else if (bot == 61 && page > 0) {
+            page--;
             invalidate();
-        } else if (dlgDelete.contains(x, y)) {
-            Prefs.BookEntry target = pendingDelete;
-            pendingDelete = null;
-            if (target != null) host.onDeleteBook(target);
-        } else {
-            // tap on scrim dismisses
-            pendingDelete = null;
+            return;
+        } else if (bot == 62 && page < pageCount - 1) {
+            page++;
             invalidate();
+            return;
+        } else if (bot == 63) { // refresh
+            blinkFrames = 1;
+            refresh();
+            return;
+        } else if (bot >= 70) {
+            handleSectionAction(bot);
+            return;
+        }
+
+        int idx = hitAction(coverHits, x, y);
+        if (idx >= 0 && idx < filtered.size()) {
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            host.onOpenBook(filtered.get(idx));
         }
     }
 
-    private int rowAt(float x, float y) {
-        for (int i = 0; i < rowRects.size(); i++) {
-            if (rowRects.get(i).contains(x, y)) return i;
+    private void handleToolTap(int tool) {
+        switch (tool) {
+            case 0: // recently opened
+                sortMode = 3;
+                page = 0;
+                rebuild();
+                invalidate();
+                break;
+            case 1: // bookshelves
+                show(new ShelfOverlay());
+                break;
+            case 2: // cloud sync
+                show(new InfoOverlay("Cloud sync",
+                        "Sign-in is not available on this build. All books are stored locally on this device."));
+                break;
+            case 10: // search
+                showSearchDialog();
+                break;
+            case 11: // sort
+                show(new SortOverlay());
+                break;
+            case 12: // view settings: cycle columns
+                cols = (cols == 4) ? 3 : (cols == 3 ? 5 : 4);
+                page = 0;
+                computeGeometry();
+                rebuild();
+                invalidate();
+                break;
+            default:
+                break;
         }
-        return -1;
+    }
+
+    private void handleSectionAction(int a) {
+        if (a < 0) return;
+        if (a == 70) {
+            settings.flash = !settings.flash;
+            prefs.saveSettings(settings);
+            invalidate();
+        } else if (a == 71) {
+            settings.haptic = !settings.haptic;
+            prefs.saveSettings(settings);
+            invalidate();
+        } else if (a >= 72 && a <= 74) {
+            settings.theme = a - 72;
+            prefs.saveSettings(settings);
+            invalidate();
+        } else if (a == 80) {
+            currentSection = SEC_LIBRARY;
+            invalidate();
+        } else if (a == 81) {
+            host.onImport();
+        } else if (a == 82) {
+            blinkFrames = 1;
+            refresh();
+        }
     }
 }

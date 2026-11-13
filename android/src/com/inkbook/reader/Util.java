@@ -73,6 +73,15 @@ public final class Util {
         }
     }
 
+    /** BOOX-style status bar clock, e.g. "3:04 PM". */
+    public static String clock12() {
+        try {
+            return new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date());
+        } catch (Exception e) {
+            return "--:--";
+        }
+    }
+
     /** Decode HTML entities without android.text (works everywhere). */
     public static String htmlToText(String s) {
         if (s == null) return "";

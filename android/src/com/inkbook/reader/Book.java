@@ -30,6 +30,7 @@ import java.util.zip.ZipFile;
 public final class Book {
 
     public String title = "";
+    public String author = "";
     public String format = "txt";
     public final List<String> paragraphs = new ArrayList<String>();
     public final List<Integer> chapterParas = new ArrayList<Integer>();
@@ -166,6 +167,39 @@ public final class Book {
                 XmlPullParser p = Xml.newPullParser();
                 p.setInput(zf.getInputStream(opfE), "UTF-8");
                 int t;
+                String capture = null;
+                StringBuilder capBuf = new StringBuilder();
+                while ((t = p.next()) != XmlPullParser.END_DOCUMENT) {
+                    String tag = p.getName();
+                    if (t == XmlPullParser.START_TAG) {
+                        if ("title".equals(tag) || "creator".equals(tag)
+                                || (tag != null && tag.endsWith(":title"))
+                                || (tag != null && tag.endsWith(":creator"))) {
+                            capture = tag;
+                            capBuf.setLength(0);
+                        }
+                    } else if (t == XmlPullParser.TEXT) {
+                        if (capture != null) capBuf.append(p.getText());
+                    } else if (t == XmlPullParser.END_TAG) {
+                        if (capture != null && tag != null && tag.equals(capture)) {
+                            String v = Util.htmlToText(capBuf.toString()).trim();
+                            if (v.length() > 0) {
+                                if (capture.endsWith("title")) {
+                                    if (title == null || title.length() == 0) title = v;
+                                } else {
+                                    if (author.length() == 0) author = v;
+                                }
+                            }
+                            capture = null;
+                        }
+                    }
+                }
+            } catch (Exception ignored) { }
+
+            try {
+                XmlPullParser p = Xml.newPullParser();
+                p.setInput(zf.getInputStream(opfE), "UTF-8");
+                int t;
                 while ((t = p.next()) != XmlPullParser.END_DOCUMENT) {
                     if (t != XmlPullParser.START_TAG) continue;
                     String tag = p.getName();
@@ -200,11 +234,87 @@ public final class Book {
                 addHtmlDoc(html);
             }
             if (paragraphs.isEmpty()) return false;
-            title = stripExt(f.getName());
+            if (title == null || title.length() == 0) title = stripExt(f.getName());
             return true;
         } finally {
             try { zf.close(); } catch (Exception ignored) { }
         }
+    }
+
+    /**
+     * Fast EPUB metadata probe: opens only the OPF and returns {title, author}.
+     * Used at import time so the library can show author names without parsing
+     * the whole book.
+     */
+    public static String[] epubMeta(File f) {
+        String[] out = new String[]{"", ""};
+        ZipFile zf = null;
+        try {
+            zf = new ZipFile(f);
+            String opfPath = null;
+            ZipEntry container = zf.getEntry("META-INF/container.xml");
+            if (container != null) {
+                try {
+                    XmlPullParser p = Xml.newPullParser();
+                    p.setInput(zf.getInputStream(container), "UTF-8");
+                    int t;
+                    while ((t = p.next()) != XmlPullParser.END_DOCUMENT) {
+                        if (t == XmlPullParser.START_TAG && "rootfile".equals(p.getName())) {
+                            opfPath = p.getAttributeValue(null, "full-path");
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) { }
+            }
+            if (opfPath == null) {
+                Enumeration<? extends ZipEntry> en = zf.entries();
+                while (en.hasMoreElements()) {
+                    String nm = en.nextElement().getName();
+                    if (nm.toLowerCase().endsWith(".opf")) { opfPath = nm; break; }
+                }
+            }
+            if (opfPath == null) return out;
+            ZipEntry opfE = zf.getEntry(opfPath);
+            if (opfE == null) opfE = zf.getEntry(urlDecode(opfPath));
+            if (opfE == null) return out;
+
+            XmlPullParser p = Xml.newPullParser();
+            p.setInput(zf.getInputStream(opfE), "UTF-8");
+            String capture = null;
+            StringBuilder capBuf = new StringBuilder();
+            int t;
+            while ((t = p.next()) != XmlPullParser.END_DOCUMENT) {
+                String tag = p.getName();
+                if (t == XmlPullParser.START_TAG) {
+                    if ("title".equals(tag) || "creator".equals(tag)
+                            || (tag != null && tag.endsWith(":title"))
+                            || (tag != null && tag.endsWith(":creator"))) {
+                        capture = tag;
+                        capBuf.setLength(0);
+                    }
+                } else if (t == XmlPullParser.TEXT) {
+                    if (capture != null) capBuf.append(p.getText());
+                } else if (t == XmlPullParser.END_TAG) {
+                    if (capture != null && tag != null && tag.equals(capture)) {
+                        String v = Util.htmlToText(capBuf.toString()).trim();
+                        if (v.length() > 0) {
+                            if (capture.endsWith("title")) {
+                                if (out[0].length() == 0) out[0] = v;
+                            } else if (out[1].length() == 0) {
+                                out[1] = v;
+                            }
+                        }
+                        capture = null;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (zf != null) {
+                try { zf.close(); } catch (Exception ignored) { }
+            }
+        }
+        return out;
     }
 
     private void addHtmlDoc(String html) {
